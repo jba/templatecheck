@@ -76,8 +76,12 @@ func TestCheck(t *testing.T) {
 		{"chain no struct", `{{(.B).I}}`, csType, noI},
 		{"chain map ok", `{{(.K).I}}`, csMapType, ""},
 		{"chain map", `{{(.K).X}}`, csMapType, noX},
+		{"chain pipe", `{{((.B) | printf).I}}`, csType, noI},
+
 		{"assign same type", `{{$v := 1}}{{$v = 2}}{{$v.I}}`, nil, noI},
 		{"assign diffrent type", `{{$v := 1}}{{$v = ""}}{{$v.I}}`, nil, noI},
+		{"func args few", `{{and}}`, nil, "want at least 1 got 0"},
+		{"func args many", `{{le 1 2 3}}`, nil, "want 2 got 3"},
 		{"undefined", `{{$x = 1}}`, nil, undef}, // parser catches references, but not assignments
 		{
 			"nested decl", // variable redeclared in an inner scope; doesn't affect outer scope

@@ -88,6 +88,8 @@ var (
 	unknownType        = reflect.TypeOf(unknown{})
 	emptyInterfaceType = reflect.TypeOf((*interface{})(nil)).Elem()
 	reflectValueType   = reflect.TypeOf((*reflect.Value)(nil)).Elem()
+	errorType          = reflect.TypeOf((*error)(nil)).Elem()
+	boolFuncType       = reflect.TypeOf(func(reflect.Value, ...reflect.Value) reflect.Value { return reflect.Value{} })
 )
 
 type checkError struct {
@@ -281,19 +283,19 @@ func (s *state) evalCommand(dot reflect.Type, cmd *parse.CommandNode, final refl
 		return s.evalFieldNode(dot, n, cmd.Args, final)
 	case *parse.ChainNode:
 		return s.evalChainNode(dot, n, cmd.Args, final)
-	// case *parse.IdentifierNode:
-	// 	// Must be a function.
-	// 	return s.evalFunction(dot, n, cmd, cmd.Args, final)
-	// case *parse.PipeNode:
-	// 	// Parenthesized pipeline. The arguments are all inside the pipeline; final must be absent.
-	// 	s.notAFunction(cmd.Args, final)
-	// 	return s.evalPipeline(dot, n)
+	case *parse.IdentifierNode:
+		// Must be a function.
+		return s.evalFunction(dot, n, cmd, cmd.Args, final)
+	case *parse.PipeNode:
+		// Parenthesized pipeline. The arguments are all inside the pipeline; final must be absent.
+		s.notAFunction(cmd.Args, final)
+		return s.evalPipeline(dot, n)
 	case *parse.VariableNode:
 		return s.evalVariableNode(dot, n, cmd.Args, final)
 	}
 	s.at(firstWord)
 	s.notAFunction(cmd.Args, final)
-	switch /*word :=*/ firstWord.(type) {
+	switch firstWord.(type) {
 	case *parse.BoolNode:
 		return boolType
 	case *parse.DotNode:
@@ -330,6 +332,16 @@ func (s *state) evalFieldChain(dot, receiver reflect.Type, node parse.Node, iden
 	}
 	// Now if it's a method, it gets the arguments.
 	return s.evalField(dot, ident[n-1], node, args, final, receiver)
+}
+
+func (s *state) evalFunction(dot reflect.Type, node *parse.IdentifierNode, cmd parse.Node, args []parse.Node, final reflect.Type) reflect.Type {
+	s.at(node)
+	name := node.Ident
+	ft := s.lookupFuncType(name)
+	if ft == nil {
+		s.errorf("%q is not a defined function", name)
+	}
+	return s.evalCall(dot, ft, cmd, name, args, final)
 }
 
 func (s *state) evalField(dot reflect.Type, fieldName string, node parse.Node, args []parse.Node, final, receiver reflect.Type) reflect.Type {
@@ -400,6 +412,43 @@ func (s *state) evalVariableNode(dot reflect.Type, variable *parse.VariableNode,
 		return typ
 	}
 	return s.evalFieldChain(dot, typ, variable, variable.Ident[1:], args, final)
+}
+
+// evalCall checks  a function or method call. If it's a method, fun already has the receiver bound, so
+// it looks just like a function call. The arg list, if non-nil, includes (in the manner of the shell), arg[0]
+// as the function itself.
+func (s *state) evalCall(dot, funType reflect.Type, node parse.Node, name string, args []parse.Node, final reflect.Type) reflect.Type {
+	if args != nil {
+		args = args[1:] // Zeroth arg is function name/node; not passed to function.
+	}
+	numIn := len(args)
+	if final != nil {
+		numIn++
+	}
+	numFixed := len(args)
+	if funType.IsVariadic() {
+		numFixed = funType.NumIn() - 1 // last arg is the variadic one.
+		if numIn < numFixed {
+			s.errorf("wrong number of args for %s: want at least %d got %d", name, funType.NumIn()-1, len(args))
+		}
+	} else if numIn != funType.NumIn() {
+		s.errorf("wrong number of args for %s: want %d got %d", name, funType.NumIn(), numIn)
+	}
+	// TODO: check args (see rest of evalCall in text/template/exec.go).
+	return funType.Out(0)
+}
+
+// validateType guarantees that the argument type is assignable to the formal type.
+func (s *state) validateType(argType, formalType reflect.Type) reflect.Type {
+	if formalType == nil || formalType == unknownType {
+		return argType
+	}
+	if argType.AssignableTo(formalType) {
+		return argType
+	}
+	// There is more we need to do here -- see validateType in text/template/exec.go --
+	// but punt for now.
+	return argType
 }
 
 // evalArg evaluates an argument to a function (usually).
@@ -494,19 +543,6 @@ func (s *state) evalEmptyInterface(dot reflect.Type, n parse.Node) reflect.Type 
 	panic("not reached")
 }
 
-// validateType guarantees that the argument type is assignable to the formal type.
-func (s *state) validateType(argType, formalType reflect.Type) reflect.Type {
-	if formalType == nil || formalType == unknownType {
-		return argType
-	}
-	if argType.AssignableTo(formalType) {
-		return argType
-	}
-	// There is more we need to do here -- see validateType in text/template/exec.go --
-	// but punt for now.
-	return argType
-}
-
 // canBeNil reports whether an untyped nil can be assigned to the type. See reflect.Zero.
 func canBeNil(typ reflect.Type) bool {
 	switch typ.Kind() {
@@ -549,4 +585,49 @@ func (s *state) errorf(format string, args ...interface{}) {
 // so it can be used safely inside a Printf format string.
 func doublePercent(str string) string {
 	return strings.ReplaceAll(str, "%", "%%")
+}
+
+var comparisonFuncType = reflect.FuncOf([]reflect.Type{reflectValueType, reflectValueType}, []reflect.Type{boolType, errorType}, false)
+
+var builtinFuncTypes = map[string]reflect.Type{
+	"and": boolFuncType,
+	"or":  boolFuncType,
+	"call": reflect.FuncOf(
+		[]reflect.Type{reflectValueType, reflect.SliceOf(reflectValueType)},
+		[]reflect.Type{reflectValueType, errorType},
+		true),
+	"html": reflect.TypeOf(template.HTMLEscaper),
+	// TODO: Use more knowledge about index and slice.
+	"index": reflect.FuncOf(
+		[]reflect.Type{reflectValueType, reflect.SliceOf(reflectValueType)},
+		[]reflect.Type{reflectValueType, errorType},
+		true),
+	"slice": reflect.FuncOf(
+		[]reflect.Type{reflectValueType, reflect.SliceOf(numberType)},
+		[]reflect.Type{reflectValueType, errorType},
+		true),
+	"js":       reflect.TypeOf(template.JSEscaper),
+	"len":      reflect.TypeOf(func(reflect.Value) (int, error) { return 0, nil }),
+	"not":      reflect.TypeOf(func(reflect.Value) bool { return false }),
+	"print":    reflect.TypeOf(fmt.Sprint),
+	"printf":   reflect.TypeOf(fmt.Sprintf),
+	"println":  reflect.TypeOf(fmt.Sprintln),
+	"urlquery": reflect.TypeOf(template.URLQueryEscaper),
+
+	// Comparisons
+	// TODO: Use more knowledge about comparison functions.
+	"eq": reflect.FuncOf(
+		[]reflect.Type{reflectValueType, reflect.SliceOf(reflectValueType)},
+		[]reflect.Type{boolType, errorType},
+		true),
+	"ge": comparisonFuncType,
+	"gt": comparisonFuncType,
+	"le": comparisonFuncType,
+	"lt": comparisonFuncType,
+	"ne": comparisonFuncType,
+}
+
+// lookupFuncType returns the function with the given name. It returns nil if there is no such function.
+func (s *state) lookupFuncType(name string) reflect.Type {
+	return builtinFuncTypes[name]
 }
