@@ -69,6 +69,11 @@ func TestCheck(t *testing.T) {
 		{"range one var", `{{range $e := .}}{{$e.X}}{{end}}`, reflect.SliceOf(csType), noX},
 		{"range two vars", `{{range $k, $e := .}}{{$e.X}}{{end}}`, reflect.MapOf(stringType, csType), noX},
 		{"range two vars 2", `{{range $k, $e := .}}{{$k.X}}{{end}}`, reflect.MapOf(csType, stringType), noX},
+		{"chain ok", `{{(.P).I}}`, csType, ""},
+		{"chain no field", `{{(.P).X}}`, csType, noX},
+		{"chain no struct", `{{(.B).I}}`, csType, noI},
+		{"chain map ok", `{{(.K).I}}`, csMapType, ""},
+		{"chain map", `{{(.K).X}}`, csMapType, noX},
 		{"assign same type", `{{$v := 1}}{{$v = 2}}{{$v.I}}`, nil, noI},
 		{"assign diffrent type", `{{$v := 1}}{{$v = ""}}{{$v.I}}`, nil, noI},
 		{"undefined", `{{$x = 1}}`, nil, undef}, // parser catches references, but not assignments

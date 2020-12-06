@@ -68,19 +68,23 @@ func (s *state) varType(name string) reflect.Type {
 	return unknownType
 }
 
-// A type representing a template number, which does not correspond to any one
-// Go numeric type.
-type number struct{}
+type (
+	// A type representing a template number, which does not correspond to any one
+	// Go numeric type.
+	number struct{}
 
-type unk struct{} // for unknown type
+	// A type representing an unknown type.
+	unknown struct{}
+)
 
 var (
-	intType          = reflect.TypeOf(int(0))
-	boolType         = reflect.TypeOf(true)
-	stringType       = reflect.TypeOf("")
-	numberType       = reflect.TypeOf(number{})
-	unknownType      = reflect.TypeOf(unk{})
-	reflectValueType = reflect.TypeOf((*reflect.Value)(nil)).Elem()
+	intType            = reflect.TypeOf(int(0))
+	boolType           = reflect.TypeOf(true)
+	stringType         = reflect.TypeOf("")
+	numberType         = reflect.TypeOf(number{})
+	unknownType        = reflect.TypeOf(unknown{})
+	emptyInterfaceType = reflect.TypeOf((*interface{})(nil)).Elem()
+	reflectValueType   = reflect.TypeOf((*reflect.Value)(nil)).Elem()
 )
 
 type checkError struct {
@@ -266,8 +270,8 @@ func (s *state) evalCommand(dot reflect.Type, cmd *parse.CommandNode, final refl
 	switch n := firstWord.(type) {
 	case *parse.FieldNode:
 		return s.evalFieldNode(dot, n, cmd.Args, final)
-	// case *parse.ChainNode:
-	// 	return s.evalChainNode(dot, n, cmd.Args, final)
+	case *parse.ChainNode:
+		return s.evalChainNode(dot, n, cmd.Args, final)
 	// case *parse.IdentifierNode:
 	// 	// Must be a function.
 	// 	return s.evalFunction(dot, n, cmd, cmd.Args, final)
@@ -365,18 +369,21 @@ func (s *state) evalField(dot reflect.Type, fieldName string, node parse.Node, a
 	panic("not reached")
 }
 
-// func (s *state) evalChainNode(dot reflect.Type, chain *parse.ChainNode, args []parse.Node, final reflect.Type) reflect.Type {
-// 	s.at(chain)
-// 	if len(chain.Field) == 0 {
-// 		s.errorf("internal error: no fields in evalChainNode")
-// 	}
-// 	if chain.Node.Type() == parse.NodeNil {
-// 		s.errorf("indirection through explicit nil in %s", chain)
-// 	}
-// 	// (pipe).Field1.Field2 has pipe as .Node, fields as .Field. Eval the pipeline, then the fields.
-// 	pipe := s.evalArg(dot, nil, chain.Node)
-// 	return s.evalFieldChain(dot, pipe, chain, chain.Field, args, final)
-// }
+func (s *state) evalChainNode(dot reflect.Type, chain *parse.ChainNode, args []parse.Node, final reflect.Type) reflect.Type {
+	s.at(chain)
+	if len(chain.Field) == 0 {
+		s.errorf("internal error: no fields in evalChainNode")
+	}
+	if chain.Node.Type() == parse.NodeNil {
+		s.errorf("indirection through explicit nil in %s", chain)
+	}
+	// (pipe).Field1.Field2 has pipe as .Node, fields as .Field. Eval the pipeline, then the fields.
+	fmt.Println("dot=", dot)
+	dump(chain.Node, 0)
+	pipe := s.evalArg(dot, emptyInterfaceType, chain.Node)
+	fmt.Println("pipe=", pipe)
+	return s.evalFieldChain(dot, pipe, chain, chain.Field, args, final)
+}
 
 func (s *state) evalVariableNode(dot reflect.Type, variable *parse.VariableNode, args []parse.Node, final reflect.Type) reflect.Type {
 	// $x.Field has $x as the first ident, Field as the second. Eval the var, then the fields.
@@ -390,52 +397,95 @@ func (s *state) evalVariableNode(dot reflect.Type, variable *parse.VariableNode,
 }
 
 // typ is the type of the formal parameter, if any.
-// func (s *state) evalArg(dot reflect.Type, typ reflect.Type, n parse.Node) reflect.Type {
-// 	s.at(n)
-// 	switch arg := n.(type) {
-// 	case *parse.DotNode:
-// 		return s.validateType(dot, typ)
-// 	case *parse.NilNode:
-// 		if canBeNil(typ) {
-// 			return typ
-// 		}
-// 		s.errorf("cannot assign nil to %s", typ)
-// 	case *parse.FieldNode:
-// 		return s.validateType(s.evalFieldNode(dot, arg, []parse.Node{n}, unknownType), typ)
-// 	case *parse.VariableNode:
-// 		return s.validateType(s.evalVariableNode(dot, arg, nil, unknownType), typ)
-// 	case *parse.PipeNode:
-// 		return s.validateType(s.evalPipeline(dot, arg), typ)
-// 	// case *parse.IdentifierNode:
-// 	// 	return s.validateType(s.evalFunction(dot, arg, arg, nil, unknownType), typ)
-// 	case *parse.ChainNode:
-// 		return s.validateType(s.evalChainNode(dot, arg, nil, unknownType), typ)
-// 	}
-// 	switch typ.Kind() {
-// 	case reflect.Bool:
-// 		return s.evalBool(typ, n)
-// 	case reflect.Complex64, reflect.Complex128:
-// 		return s.evalComplex(typ, n)
-// 	case reflect.Float32, reflect.Float64:
-// 		return s.evalFloat(typ, n)
-// 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-// 		return s.evalInteger(typ, n)
-// 	case reflect.Interface:
-// 		if typ.NumMethod() == 0 {
-// 			return s.evalEmptyInterface(dot, n)
-// 		}
-// 	case reflect.Struct:
-// 		if typ == reflectValueType {
-// 			return reflect.ValueOf(s.evalEmptyInterface(dot, n))
-// 		}
-// 	case reflect.String:
-// 		return s.evalString(typ, n)
-// 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-// 		return s.evalUnsignedInteger(typ, n)
-// 	}
-// 	s.errorf("can't handle %s for arg of type %s", n, typ)
-// 	panic("not reached")
-// }
+func (s *state) evalArg(dot reflect.Type, typ reflect.Type, n parse.Node) reflect.Type {
+	s.at(n)
+	switch arg := n.(type) {
+	case *parse.DotNode:
+		return s.validateType(dot, typ)
+	case *parse.NilNode:
+		if canBeNil(typ) {
+			return typ
+		}
+		s.errorf("cannot assign nil to %s", typ)
+	case *parse.FieldNode:
+		return s.validateType(s.evalFieldNode(dot, arg, []parse.Node{n}, nil), typ)
+	case *parse.VariableNode:
+		return s.validateType(s.evalVariableNode(dot, arg, nil, nil), typ)
+	case *parse.PipeNode:
+		fmt.Println("####", arg, typ)
+		return s.validateType(s.evalPipeline(dot, arg), typ)
+	// case *parse.IdentifierNode:
+	// 	return s.validateType(s.evalFunction(dot, arg, arg, nil, unknownType), typ)
+	case *parse.ChainNode:
+		return s.validateType(s.evalChainNode(dot, arg, nil, nil), typ)
+	}
+	switch typ.Kind() {
+	case reflect.Bool:
+		_, ok := n.(*parse.BoolNode)
+		return s.evalPrim(typ, n, ok)
+	case reflect.String:
+		_, ok := n.(*parse.StringNode)
+		return s.evalPrim(typ, n, ok)
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		nn, ok := n.(*parse.NumberNode)
+		return s.evalPrim(typ, n, ok && nn.IsInt)
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		nn, ok := n.(*parse.NumberNode)
+		return s.evalPrim(typ, n, ok && nn.IsUint)
+	case reflect.Float32, reflect.Float64:
+		nn, ok := n.(*parse.NumberNode)
+		return s.evalPrim(typ, n, ok && nn.IsFloat)
+	case reflect.Complex64, reflect.Complex128:
+		nn, ok := n.(*parse.NumberNode)
+		return s.evalPrim(typ, n, ok && nn.IsComplex)
+	case reflect.Interface:
+		if typ.NumMethod() == 0 {
+			return s.evalEmptyInterface(dot, n)
+		}
+	case reflect.Struct:
+		if typ == reflectValueType {
+			return reflectValueType
+		}
+	}
+	s.errorf("can't handle %s for arg of type %s", n, typ)
+	panic("not reached")
+}
+
+func (s *state) evalPrim(formalType reflect.Type, n parse.Node, ok bool) reflect.Type {
+	s.at(n)
+	if ok {
+		return formalType
+	}
+	s.errorf("expected %s; found %s", formalType, n)
+	panic("not reached")
+}
+
+func (s *state) evalEmptyInterface(dot reflect.Type, n parse.Node) reflect.Type {
+	s.at(n)
+	switch n := n.(type) {
+	case *parse.BoolNode:
+		return boolType
+	case *parse.DotNode:
+		return dot
+	case *parse.FieldNode:
+		return s.evalFieldNode(dot, n, nil, nil)
+	// case *parse.IdentifierNode:
+	// 	return s.evalFunction(dot, n, n, nil, nil)
+	case *parse.NilNode:
+		// NilNode is handled in evalArg, the only place that calls here.
+		s.errorf("evalEmptyInterface: nil (can't happen)")
+	case *parse.NumberNode:
+		return numberType
+	case *parse.StringNode:
+		return stringType
+	case *parse.VariableNode:
+		return s.evalVariableNode(dot, n, nil, nil)
+	case *parse.PipeNode:
+		return s.evalPipeline(dot, n)
+	}
+	s.errorf("can't handle assignment of %s to empty interface argument", n)
+	panic("not reached")
+}
 
 // validateType guarantees that the argument type is assignable to the formal type.
 func (s *state) validateType(argType, formalType reflect.Type) reflect.Type {
