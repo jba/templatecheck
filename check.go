@@ -1,9 +1,11 @@
 /* TODO
+   - Increase coverage.
+   - Let the user provide functions (via a variadic FuncMap arg on Check), and check them.
+   - Typecheck function/method arg types.
    - Test a chain node with a nil, like `{{(nil).X}}`.
      The nil case in evalArg returns typ, which would be nil here, which is bad.
      I'm not sure how to generate a nil in that position; I get the error "nil
      is not a command" when I try.
-
 */
 
 package templatecheck
@@ -356,8 +358,23 @@ func (s *state) evalField(dot reflect.Type, fieldName string, node parse.Node, a
 		ptr = reflect.PtrTo(ptr)
 	}
 	if method, ok := ptr.MethodByName(fieldName); ok {
-		_ = method
-		return nil //s.evalCall(dot, method, node, fieldName, args, final)
+		// If method.Func is nil, method.Type describes the function
+		// without a receiver, which is what evalCall wants.
+		// If method.Func is not nil, then method.Type has the receiver
+		// as a first arg, so create a new function type without the first arg.
+		mt := method.Type
+		if method.Func.IsValid() {
+			ins := make([]reflect.Type, mt.NumIn()-1)
+			for i := 1; i < mt.NumIn(); i++ {
+				ins[i-1] = mt.In(i)
+			}
+			outs := make([]reflect.Type, mt.NumOut())
+			for i := 0; i < mt.NumOut(); i++ {
+				outs[i] = mt.Out(i)
+			}
+			mt = reflect.FuncOf(ins, outs, mt.IsVariadic())
+		}
+		return s.evalCall(dot, mt, node, fieldName, args, final)
 	}
 	hasArgs := len(args) > 1 || final != nil
 	// It's not a method; must be a field of a struct or an element of a map.
@@ -525,8 +542,8 @@ func (s *state) evalEmptyInterface(dot reflect.Type, n parse.Node) reflect.Type 
 		return dot
 	case *parse.FieldNode:
 		return s.evalFieldNode(dot, n, nil, nil)
-	// case *parse.IdentifierNode:
-	// 	return s.evalFunction(dot, n, n, nil, nil)
+	case *parse.IdentifierNode:
+		return s.evalFunction(dot, n, n, nil, nil)
 	case *parse.NilNode:
 		// NilNode is handled in evalArg, the only place that calls here.
 		s.errorf("evalEmptyInterface: nil (can't happen)")

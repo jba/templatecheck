@@ -3,6 +3,7 @@ package templatecheck
 import (
 	"flag"
 	"fmt"
+	"io"
 	"reflect"
 	"strings"
 	"testing"
@@ -16,8 +17,11 @@ type checkStruct struct {
 	B     bool
 	I     int
 	P     *checkStruct
+	R     io.Reader
 	unexp int
 }
+
+func (c checkStruct) Add(x int) int { return c.I + x }
 
 func TestCheck(t *testing.T) {
 	const (
@@ -42,6 +46,12 @@ func TestCheck(t *testing.T) {
 		{"no field", `{{.X}}`, csType, noX},
 		{"no field ptr", `{{.X}}`, reflect.PtrTo(csType), noX},
 		{"unexported", `{{.unexp}}`, csType, "unexported field"},
+		{"method ok", `{{.Add 1}}`, csType, ""},
+		{"method too few", `{{.Add}}`, csType, "want 1 got 0"},
+		{"method too many", `{{.Add 1 2}}`, csType, "want 1 got 2"},
+		{"method interface ok", `{{.R.Read 1}}`, csType, ""},
+		{"method interface too few", `{{.R.Read}}`, csType, "want 1 got 0"},
+		{"method interface too many", `{{.R.Read 1 true ""}}`, csType, "want 1 got 3"},
 		{"not a struct", `{{.B.I}}`, csType, noI},
 		{"not a func", `{{.I 1}}`, csType, "cannot be invoked"},
 		{"nested", `{{.P.P.P.X}}`, csType, noX},
@@ -82,6 +92,7 @@ func TestCheck(t *testing.T) {
 		{"assign diffrent type", `{{$v := 1}}{{$v = ""}}{{$v.I}}`, nil, noI},
 		{"func args few", `{{and}}`, nil, "want at least 1 got 0"},
 		{"func args many", `{{le 1 2 3}}`, nil, "want 2 got 3"},
+		{"len", `{{(len .).I}}`, csMapType, noI},
 		{"undefined", `{{$x = 1}}`, nil, undef}, // parser catches references, but not assignments
 		{
 			"nested decl", // variable redeclared in an inner scope; doesn't affect outer scope
