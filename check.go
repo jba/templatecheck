@@ -65,18 +65,22 @@ func (s *state) varType(name string) reflect.Type {
 		}
 	}
 	s.errorf("undefined variable: %s", name)
-	return nil
+	return unknownType
 }
 
 // A type representing a template number, which does not correspond to any one
 // Go numeric type.
 type number struct{}
 
+type unk struct{} // for unknown type
+
 var (
-	intType    = reflect.TypeOf(int(0))
-	boolType   = reflect.TypeOf(true)
-	stringType = reflect.TypeOf("")
-	numberType = reflect.TypeOf(number{})
+	intType          = reflect.TypeOf(int(0))
+	boolType         = reflect.TypeOf(true)
+	stringType       = reflect.TypeOf("")
+	numberType       = reflect.TypeOf(number{})
+	unknownType      = reflect.TypeOf(unk{})
+	reflectValueType = reflect.TypeOf((*reflect.Value)(nil)).Elem()
 )
 
 type checkError struct {
@@ -180,7 +184,7 @@ func joinVars(origVars, ifVars, elseVars []variable) {
 	for i := range origVars {
 		ot := origVars[i].typ
 		if ifVars[i].typ != ot || (elseVars != nil && elseVars[i].typ != ot) {
-			origVars[i].typ = nil
+			origVars[i].typ = unknownType
 		}
 	}
 }
@@ -316,8 +320,8 @@ func (s *state) evalFieldChain(dot, receiver reflect.Type, node parse.Node, iden
 }
 
 func (s *state) evalField(dot reflect.Type, fieldName string, node parse.Node, args []parse.Node, final, receiver reflect.Type) reflect.Type {
-	if receiver == nil {
-		return nil
+	if receiver == unknownType {
+		return unknownType
 	}
 	receiver = indirectType(receiver)
 	// Unless it's an interface, need to get to a value of type *T to guarantee
@@ -347,26 +351,32 @@ func (s *state) evalField(dot reflect.Type, fieldName string, node parse.Node, a
 		}
 	case reflect.Map:
 		// If it's a map, attempt to use the field name as a key.
-		nameVal := reflect.ValueOf(fieldName)
-		if nameVal.Type().AssignableTo(receiver.Key()) {
+		if stringType.AssignableTo(receiver.Key()) {
 			if hasArgs {
 				s.errorf("%s is not a method but has arguments", fieldName)
 			}
-			return receiver.Key()
+			return receiver.Elem()
 		}
-	case reflect.Ptr:
-		etyp := receiver.Elem()
-		if etyp.Kind() == reflect.Struct {
-			if _, ok := etyp.FieldByName(fieldName); !ok {
-				// If there's no such field, say "can't evaluate"
-				// instead of "nil pointer evaluating".
-				break
-			}
-		}
+
+		// A reflect.Ptr case appears in the template interpreter, but can't
+		// happen here because indirectType never returns a Ptr.
 	}
 	s.errorf("can't use field %s in type %s", fieldName, receiver)
 	panic("not reached")
 }
+
+// func (s *state) evalChainNode(dot reflect.Type, chain *parse.ChainNode, args []parse.Node, final reflect.Type) reflect.Type {
+// 	s.at(chain)
+// 	if len(chain.Field) == 0 {
+// 		s.errorf("internal error: no fields in evalChainNode")
+// 	}
+// 	if chain.Node.Type() == parse.NodeNil {
+// 		s.errorf("indirection through explicit nil in %s", chain)
+// 	}
+// 	// (pipe).Field1.Field2 has pipe as .Node, fields as .Field. Eval the pipeline, then the fields.
+// 	pipe := s.evalArg(dot, nil, chain.Node)
+// 	return s.evalFieldChain(dot, pipe, chain, chain.Field, args, final)
+// }
 
 func (s *state) evalVariableNode(dot reflect.Type, variable *parse.VariableNode, args []parse.Node, final reflect.Type) reflect.Type {
 	// $x.Field has $x as the first ident, Field as the second. Eval the var, then the fields.
@@ -379,9 +389,81 @@ func (s *state) evalVariableNode(dot reflect.Type, variable *parse.VariableNode,
 	return s.evalFieldChain(dot, typ, variable, variable.Ident[1:], args, final)
 }
 
+// typ is the type of the formal parameter, if any.
+// func (s *state) evalArg(dot reflect.Type, typ reflect.Type, n parse.Node) reflect.Type {
+// 	s.at(n)
+// 	switch arg := n.(type) {
+// 	case *parse.DotNode:
+// 		return s.validateType(dot, typ)
+// 	case *parse.NilNode:
+// 		if canBeNil(typ) {
+// 			return typ
+// 		}
+// 		s.errorf("cannot assign nil to %s", typ)
+// 	case *parse.FieldNode:
+// 		return s.validateType(s.evalFieldNode(dot, arg, []parse.Node{n}, unknownType), typ)
+// 	case *parse.VariableNode:
+// 		return s.validateType(s.evalVariableNode(dot, arg, nil, unknownType), typ)
+// 	case *parse.PipeNode:
+// 		return s.validateType(s.evalPipeline(dot, arg), typ)
+// 	// case *parse.IdentifierNode:
+// 	// 	return s.validateType(s.evalFunction(dot, arg, arg, nil, unknownType), typ)
+// 	case *parse.ChainNode:
+// 		return s.validateType(s.evalChainNode(dot, arg, nil, unknownType), typ)
+// 	}
+// 	switch typ.Kind() {
+// 	case reflect.Bool:
+// 		return s.evalBool(typ, n)
+// 	case reflect.Complex64, reflect.Complex128:
+// 		return s.evalComplex(typ, n)
+// 	case reflect.Float32, reflect.Float64:
+// 		return s.evalFloat(typ, n)
+// 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+// 		return s.evalInteger(typ, n)
+// 	case reflect.Interface:
+// 		if typ.NumMethod() == 0 {
+// 			return s.evalEmptyInterface(dot, n)
+// 		}
+// 	case reflect.Struct:
+// 		if typ == reflectValueType {
+// 			return reflect.ValueOf(s.evalEmptyInterface(dot, n))
+// 		}
+// 	case reflect.String:
+// 		return s.evalString(typ, n)
+// 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+// 		return s.evalUnsignedInteger(typ, n)
+// 	}
+// 	s.errorf("can't handle %s for arg of type %s", n, typ)
+// 	panic("not reached")
+// }
+
+// validateType guarantees that the argument type is assignable to the formal type.
+func (s *state) validateType(argType, formalType reflect.Type) reflect.Type {
+	if argType == unknownType || formalType == unknownType {
+		return unknownType
+	}
+	if argType.AssignableTo(formalType) {
+		return argType
+	}
+	// There is more we need to do here -- see validateType in text/template/exec.go --
+	// but punt for now.
+	return argType
+}
+
+// canBeNil reports whether an untyped nil can be assigned to the type. See reflect.Zero.
+func canBeNil(typ reflect.Type) bool {
+	switch typ.Kind() {
+	case reflect.Chan, reflect.Func, reflect.Interface, reflect.Map, reflect.Ptr, reflect.Slice:
+		return true
+	case reflect.Struct:
+		return typ == reflectValueType
+	}
+	return false
+}
+
 func indirectType(t reflect.Type) reflect.Type {
-	if t == nil {
-		return nil
+	if t == unknownType {
+		return unknownType
 	}
 	for t.Kind() == reflect.Ptr {
 		t = t.Elem()

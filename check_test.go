@@ -13,12 +13,11 @@ import (
 var debug = flag.Bool("debug", false, "display extra debug output")
 
 type checkStruct struct {
-	B bool
-	I int
-	P *checkStruct
+	B     bool
+	I     int
+	P     *checkStruct
+	unexp int
 }
-
-var csType = reflect.TypeOf(checkStruct{})
 
 func TestCheck(t *testing.T) {
 	const (
@@ -26,6 +25,12 @@ func TestCheck(t *testing.T) {
 		noI   = "can't use field I in type"
 		undef = "undefined variable"
 	)
+
+	var (
+		csType    = reflect.TypeOf(checkStruct{})
+		csMapType = reflect.MapOf(stringType, csType)
+	)
+
 	for _, test := range []struct {
 		name     string
 		contents string
@@ -36,12 +41,20 @@ func TestCheck(t *testing.T) {
 		{"field ptr", `{{.B}}`, reflect.PtrTo(csType), ""},
 		{"no field", `{{.X}}`, csType, noX},
 		{"no field ptr", `{{.X}}`, reflect.PtrTo(csType), noX},
+		{"unexported", `{{.unexp}}`, csType, "unexported field"},
 		{"not a struct", `{{.B.I}}`, csType, noI},
+		{"not a func", `{{.I 1}}`, csType, "cannot be invoked"},
 		{"nested", `{{.P.P.P.X}}`, csType, noX},
+		{"map key ok", `{{.X.I}}`, csMapType, ""},
+		{"map key no field", `{{.X.X}}`, csMapType, noX},
+		{"map key arg", `{{.X 1}}`, csMapType, "is not a method but has arguments"},
+		{"map key bad type", `{{.X}}`, reflect.MapOf(boolType, stringType), "bad"},
 		{"decl ok", `{{$x := .}}{{$x.B}}`, csType, ""},
 		{"decl", `{{$x := .}}{{$x.X}}`, csType, noX},
 		{"decl bool", `{{$x := true}}{{$x.I}}`, csType, noI},
 		{"decl int", `{{$x := 1}}{{$x.I}}`, csType, noI},
+		{"not a func var", `{{$x := 1}}{{$x 1}}`, csType, "can't give argument to non-function"},
+		{"not a func pipe", `{{$x := 1}}{{1 | $x}}`, csType, "can't give argument to non-function"},
 		{"with", `{{with .P}}{{.X}}{{end}}`, csType, noX},
 		{"with else", `{{with .P}}{{.B}}{{else}}{{.X}}{{end}}`, csType, noX},
 		{"with dollar", `{{with .B}}{{$.X}}{{end}}`, csType, noX},
@@ -49,7 +62,7 @@ func TestCheck(t *testing.T) {
 		{"ifelse", `{{if .P}}{{.B}}{{else}}{{.X}}{{end}}`, csType, noX},
 		{"range slice ok", `{{range .}}{{.P.B}}{{end}}`, reflect.SliceOf(csType), ""},
 		{"range slice", `{{range .}}{{.X}}{{end}}`, reflect.SliceOf(csType), noX},
-		{"range map", `{{range .}}{{.X}}{{end}}`, reflect.MapOf(stringType, csType), noX},
+		{"range map", `{{range .}}{{.X}}{{end}}`, csMapType, noX},
 		{"range chan ok", `{{range .}}{{.I}}{{end}}`, reflect.ChanOf(reflect.BothDir, csType), ""},
 		{"range chan", `{{range .}}{{.X}}{{end}}`, reflect.ChanOf(reflect.BothDir, csType), noX},
 		{"range chan send", `{{range .}}{{end}}`, reflect.ChanOf(reflect.SendDir, csType), "over send-only channel"},
@@ -144,6 +157,24 @@ func TestCheck(t *testing.T) {
 			`,
 			csType,
 			"",
+		},
+		{
+			"template call ok",
+			`
+				{{template "foo" .}}
+				{{define "foo"}}{{.I}}{{end}}
+			`,
+			csType,
+			"",
+		},
+		{
+			"template call  no x",
+			`
+				{{template "foo" .}}
+				{{define "foo"}}{{.X}}{{end}}
+			`,
+			csType,
+			noX,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
