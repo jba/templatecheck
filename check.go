@@ -1,6 +1,9 @@
 /* TODO
+   - Test a chain node with a nil, like `{{(nil).X}}`.
+     The nil case in evalArg returns typ, which would be nil here, which is bad.
+     I'm not sure how to generate a nil in that position; I get the error "nil
+     is not a command" when I try.
 
-   Use walkCopy in range/else.
 */
 
 package templatecheck
@@ -138,8 +141,8 @@ func (s *state) walk(dot reflect.Type, node parse.Node) {
 // walkIfOrWith walks an 'if' or 'with' node. The two control structures
 // are identical in behavior except that 'with' sets dot.
 func (s *state) walkIfOrWith(ntype parse.NodeType, dot reflect.Type, pipe *parse.PipeNode, list, elseList *parse.ListNode) {
-	m := s.mark()
-	defer s.pop(m)
+	mark := s.mark()
+	defer s.pop(mark)
 
 	// Evaluate the argument to if/walk.
 	// We still need to do this even in the case of `if`, for effects (var decls
@@ -157,7 +160,7 @@ func (s *state) walkIfOrWith(ntype parse.NodeType, dot reflect.Type, pipe *parse
 	}
 	// Join the two or three variable stacks, but don't go past where we're
 	// going to pop anyway.
-	joinVars(s.vars[:m], ifVars, elseVars)
+	joinVars(s.vars[:mark], ifVars, elseVars)
 }
 
 // walkCopy walks node with dot on a copy of the variable stack, and returns the copy.
@@ -195,11 +198,13 @@ func joinVars(origVars, ifVars, elseVars []variable) {
 
 func (s *state) walkRange(dot reflect.Type, r *parse.RangeNode) {
 	s.at(r)
-	defer s.pop(s.mark())
+	origMark := s.mark()
+	defer s.pop(origMark)
 	typ := indirectType(s.evalPipeline(dot, r.Pipe))
+
 	// mark top of stack before any variables in the body are pushed.
 	mark := s.mark()
-	checkBody := func(index, elem reflect.Type) {
+	checkBody := func(index, elem reflect.Type) []variable {
 		// Set top var (lexically the second if there are two) to the element.
 		if len(r.Pipe.Decl) > 0 {
 			s.setTopVar(1, elem)
@@ -208,27 +213,31 @@ func (s *state) walkRange(dot reflect.Type, r *parse.RangeNode) {
 		if len(r.Pipe.Decl) > 1 {
 			s.setTopVar(2, index)
 		}
-		s.walk(elem, r.List)
+		vars := s.walkCopy(elem, r.List)
 		s.pop(mark)
+		return vars
 	}
+
+	var rangeVars, elseVars []variable
 	switch typ.Kind() {
 	case reflect.Array, reflect.Slice:
-		checkBody(intType, typ.Elem())
+		rangeVars = checkBody(intType, typ.Elem())
 	case reflect.Map:
-		checkBody(typ.Key(), typ.Elem())
+		rangeVars = checkBody(typ.Key(), typ.Elem())
 	case reflect.Chan:
 		if typ.ChanDir() == reflect.SendDir {
 			s.errorf("range can't iterate over send-only channel %v", typ)
 		}
-		checkBody(intType, typ.Elem())
+		rangeVars = checkBody(intType, typ.Elem())
 	case reflect.Invalid:
 		// An invalid value is likely a nil map, etc. and acts like an empty map.
 	default:
 		s.errorf("range can't iterate over type %v", typ)
 	}
 	if r.ElseList != nil {
-		s.walk(dot, r.ElseList)
+		elseVars = s.walkCopy(dot, r.ElseList)
 	}
+	joinVars(s.vars[:origMark], rangeVars, elseVars)
 }
 
 func (s *state) walkTemplate(dot reflect.Type, t *parse.TemplateNode) {
@@ -378,10 +387,7 @@ func (s *state) evalChainNode(dot reflect.Type, chain *parse.ChainNode, args []p
 		s.errorf("indirection through explicit nil in %s", chain)
 	}
 	// (pipe).Field1.Field2 has pipe as .Node, fields as .Field. Eval the pipeline, then the fields.
-	fmt.Println("dot=", dot)
-	dump(chain.Node, 0)
-	pipe := s.evalArg(dot, emptyInterfaceType, chain.Node)
-	fmt.Println("pipe=", pipe)
+	pipe := s.evalArg(dot, nil, chain.Node)
 	return s.evalFieldChain(dot, pipe, chain, chain.Field, args, final)
 }
 
@@ -396,7 +402,9 @@ func (s *state) evalVariableNode(dot reflect.Type, variable *parse.VariableNode,
 	return s.evalFieldChain(dot, typ, variable, variable.Ident[1:], args, final)
 }
 
-// typ is the type of the formal parameter, if any.
+// evalArg evaluates an argument to a function (usually).
+// typ is the type of the formal parameter, or nil if there isn't one
+// (as in evalChainNode).
 func (s *state) evalArg(dot reflect.Type, typ reflect.Type, n parse.Node) reflect.Type {
 	s.at(n)
 	switch arg := n.(type) {
@@ -412,7 +420,6 @@ func (s *state) evalArg(dot reflect.Type, typ reflect.Type, n parse.Node) reflec
 	case *parse.VariableNode:
 		return s.validateType(s.evalVariableNode(dot, arg, nil, nil), typ)
 	case *parse.PipeNode:
-		fmt.Println("####", arg, typ)
 		return s.validateType(s.evalPipeline(dot, arg), typ)
 	// case *parse.IdentifierNode:
 	// 	return s.validateType(s.evalFunction(dot, arg, arg, nil, unknownType), typ)
@@ -489,8 +496,8 @@ func (s *state) evalEmptyInterface(dot reflect.Type, n parse.Node) reflect.Type 
 
 // validateType guarantees that the argument type is assignable to the formal type.
 func (s *state) validateType(argType, formalType reflect.Type) reflect.Type {
-	if argType == unknownType || formalType == unknownType {
-		return unknownType
+	if formalType == nil || formalType == unknownType {
+		return argType
 	}
 	if argType.AssignableTo(formalType) {
 		return argType

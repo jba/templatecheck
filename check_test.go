@@ -69,7 +69,9 @@ func TestCheck(t *testing.T) {
 		{"range one var", `{{range $e := .}}{{$e.X}}{{end}}`, reflect.SliceOf(csType), noX},
 		{"range two vars", `{{range $k, $e := .}}{{$e.X}}{{end}}`, reflect.MapOf(stringType, csType), noX},
 		{"range two vars 2", `{{range $k, $e := .}}{{$k.X}}{{end}}`, reflect.MapOf(csType, stringType), noX},
+		{"range bad type", `{{range 1}}{{end}}`, nil, "can't iterate over type"},
 		{"chain ok", `{{(.P).I}}`, csType, ""},
+		{"chain bool", `{{(true).I}}`, csType, noI},
 		{"chain no field", `{{(.P).X}}`, csType, noX},
 		{"chain no struct", `{{(.B).I}}`, csType, noI},
 		{"chain map ok", `{{(.K).I}}`, csMapType, ""},
@@ -112,7 +114,7 @@ func TestCheck(t *testing.T) {
 			"",
 		},
 		{
-			"conditional assign same type", // variable assigned to same type in conditional
+			"if assign same type", // variable assigned to same type in conditional
 			`
 				{{$v := 1}}
 				{{if .}}
@@ -124,7 +126,7 @@ func TestCheck(t *testing.T) {
 			noI,
 		},
 		{
-			"conditional assign different type", // variable assigned to different type in conditional
+			"if assign different type", // variable assigned to different type in conditional
 			`
 				{{$v := 1}}
 				{{if .}}
@@ -136,7 +138,7 @@ func TestCheck(t *testing.T) {
 			"", // be conservative, do not warn
 		},
 		{
-			"conditional assign same type else",
+			"if assign same type else",
 			`
 				{{$v := 1}}
 				{{if .}}
@@ -150,7 +152,7 @@ func TestCheck(t *testing.T) {
 			noI,
 		},
 		{
-			"conditional assign different type else",
+			"if assign different type else",
 			`
 				{{$v := 1}}
 				{{if .}}
@@ -164,6 +166,58 @@ func TestCheck(t *testing.T) {
 			"",
 		},
 		{
+			"range assign same type",
+			`
+				{{$v := 1}}
+				{{range .}}
+					{{$v = 2i}}
+				{{end}}
+				{{$v.I}}
+			`,
+			csMapType,
+			noI,
+		},
+		{
+			"range assign different type",
+			`
+				{{$v := 1}}
+				{{range .}}
+					{{$v = ""}}
+				{{end}}
+				{{$v.I}}
+			`,
+			csMapType,
+			"", // conservative
+		},
+		{
+			"range else same type",
+			`
+				{{$v := 1}}
+				{{range .}}
+					{{$v = 2}}
+				{{else}}
+					{{$v = 3}}
+				{{end}}
+				{{$v.I}}
+			`,
+			csMapType,
+			noI,
+		},
+		{
+			"range else different type",
+			`
+				{{$v := 1}}
+				{{range .}}
+					{{$v = 2}}
+				{{else}}
+					{{$v = ""}}
+				{{end}}
+				{{$v.I}}
+			`,
+			csMapType,
+			"",
+		},
+		{
 			"template call ok",
 			`
 				{{template "foo" .}}
@@ -173,13 +227,22 @@ func TestCheck(t *testing.T) {
 			"",
 		},
 		{
-			"template call  no x",
+			"template call no x",
 			`
 				{{template "foo" .}}
 				{{define "foo"}}{{.X}}{{end}}
 			`,
 			csType,
 			noX,
+		},
+		{
+			"template call undef",
+			`
+				{{template "bar" .}}
+				{{define "foo"}}{{.X}}{{end}}
+			`,
+			csType,
+			`template "bar" not defined`,
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
