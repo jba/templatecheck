@@ -48,6 +48,7 @@ func TestCheck(t *testing.T) {
 	}{
 		{"field", `{{.B}}`, csType, ""},
 		{"field ptr", `{{.B}}`, reflect.PtrTo(csType), ""},
+		{"field iface", `{{.B}}`, emptyInterfaceType, ""},
 		{"no field", `{{.X}}`, csType, noX},
 		{"no field ptr", `{{.X}}`, reflect.PtrTo(csType), noX},
 		{"unexported", `{{.unexp}}`, csType, "unexported field"},

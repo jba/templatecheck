@@ -423,6 +423,10 @@ func (s *state) evalField(dot reflect.Type, fieldName string, node parse.Node, a
 			return receiver.Elem()
 		}
 
+	case reflect.Interface:
+		// We can't assume anything about what's in an interface.
+		return unknownType
+
 		// A reflect.Ptr case appears in the template interpreter, but can't
 		// happen here because indirectType never returns a Ptr.
 	}
