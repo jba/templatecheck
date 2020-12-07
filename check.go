@@ -1,9 +1,5 @@
 /* TODO
    - Increase coverage.
-   - Test a chain node with a nil, like `{{(nil).X}}`.
-     The nil case in evalArg returns typ, which would be nil here, which is bad.
-     I'm not sure how to generate a nil in that position; I get the error "nil
-     is not a command" when I try.
 */
 
 package templatecheck
@@ -610,9 +606,9 @@ func (s *state) checkArg(dot, typ reflect.Type, n parse.Node) {
 		return
 	case reflect.Interface:
 		if typ.NumMethod() == 0 {
-			s.evalEmptyInterface(dot, n)
+			s.checkEmptyInterface(dot, n)
+			return
 		}
-		return
 	case reflect.Struct:
 		if typ == reflectValueType {
 			return
@@ -628,31 +624,34 @@ func (s *state) checkPrim(formalType reflect.Type, n parse.Node, ok bool) {
 	}
 }
 
-func (s *state) evalEmptyInterface(dot reflect.Type, n parse.Node) reflect.Type {
+func (s *state) checkEmptyInterface(dot reflect.Type, n parse.Node) {
 	s.at(n)
 	switch n := n.(type) {
 	case *parse.BoolNode:
-		return boolType
+		return
 	case *parse.DotNode:
-		return dot
+		return
 	case *parse.FieldNode:
-		return s.evalFieldNode(dot, n, nil, nil)
+		_ = s.evalFieldNode(dot, n, nil, nil)
+		return
 	case *parse.IdentifierNode:
-		return s.evalFunction(dot, n, n, nil, nil)
+		_ = s.evalFunction(dot, n, n, nil, nil)
+		return
 	case *parse.NilNode:
 		// NilNode is handled in evalArg, the only place that calls here.
 		s.errorf("evalEmptyInterface: nil (can't happen)")
 	case *parse.NumberNode:
-		return numberType
+		return
 	case *parse.StringNode:
-		return stringType
+		return
 	case *parse.VariableNode:
-		return s.evalVariableNode(dot, n, nil, nil)
+		_ = s.evalVariableNode(dot, n, nil, nil)
+		return
 	case *parse.PipeNode:
-		return s.evalPipeline(dot, n)
+		_ = s.evalPipeline(dot, n)
+		return
 	}
 	s.errorf("can't handle assignment of %s to empty interface argument", n)
-	panic("not reached")
 }
 
 // canBeNil reports whether an untyped nil can be assigned to the type. See reflect.Zero.
