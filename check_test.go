@@ -87,7 +87,6 @@ func TestCheck(t *testing.T) {
 		{"chain map ok", `{{(.K).I}}`, csMapType, ""},
 		{"chain map", `{{(.K).X}}`, csMapType, noX},
 		{"chain pipe", `{{((.B) | printf).I}}`, csType, noI},
-
 		{"assign same type", `{{$v := 1}}{{$v = 2}}{{$v.I}}`, nil, noI},
 		{"assign diffrent type", `{{$v := 1}}{{$v = ""}}{{$v.I}}`, nil, noI},
 		{"func args few", `{{and}}`, nil, "want at least 1 got 0"},

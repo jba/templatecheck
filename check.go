@@ -2,6 +2,7 @@
    - Increase coverage.
    - Let the user provide functions (via a variadic FuncMap arg on Check), and check them.
    - Typecheck function/method arg types.
+   - Look at chain nodes that occur as operands. See template/parse/parse.go:Tree.operand.
    - Test a chain node with a nil, like `{{(nil).X}}`.
      The nil case in evalArg returns typ, which would be nil here, which is bad.
      I'm not sure how to generate a nil in that position; I get the error "nil
@@ -468,9 +469,9 @@ func (s *state) validateType(argType, formalType reflect.Type) reflect.Type {
 	return argType
 }
 
-// evalArg evaluates an argument to a function (usually).
-// typ is the type of the formal parameter, or nil if there isn't one
-// (as in evalChainNode).
+// evalArg evaluates an argument to a function. It is also used (in
+// evalChainNode) to evaluation a general expression. typ is the type of the
+// formal parameter, or nil if there isn't one (as in evalChainNode).
 func (s *state) evalArg(dot reflect.Type, typ reflect.Type, n parse.Node) reflect.Type {
 	s.at(n)
 	switch arg := n.(type) {
@@ -487,8 +488,8 @@ func (s *state) evalArg(dot reflect.Type, typ reflect.Type, n parse.Node) reflec
 		return s.validateType(s.evalVariableNode(dot, arg, nil, nil), typ)
 	case *parse.PipeNode:
 		return s.validateType(s.evalPipeline(dot, arg), typ)
-	// case *parse.IdentifierNode:
-	// 	return s.validateType(s.evalFunction(dot, arg, arg, nil, unknownType), typ)
+	case *parse.IdentifierNode:
+		return s.validateType(s.evalFunction(dot, arg, arg, nil, unknownType), typ)
 	case *parse.ChainNode:
 		return s.validateType(s.evalChainNode(dot, arg, nil, nil), typ)
 	}
