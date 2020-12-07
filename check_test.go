@@ -105,6 +105,7 @@ func TestCheck(t *testing.T) {
 		{"userfunc too few", `{{pluralize 3}}`, nil, "want 2, got 1"},
 		{"userfunc wrong type", `{{pluralize (pluralize 1 "x") "y"}}`, nil, "expected int; found string"},
 		{"variadic", `{{variadic 1 2}}`, nil, "expected string; found 2"},
+		{"var arg", `{{$v := 1}}{{pluralize $v "x"}}`, nil, ""},
 		{"undefined", `{{$x = 1}}`, nil, undef}, // parser catches references, but not assignments
 		{
 			"nested decl", // variable redeclared in an inner scope; doesn't affect outer scope

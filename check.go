@@ -1,8 +1,9 @@
 /* TODO
    - Increase coverage.
-   - Let the user provide functions (via a variadic FuncMap arg on Check), and check them.
-   - Typecheck function/method arg types.
    - Look at chain nodes that occur as operands. See template/parse/parse.go:Tree.operand.
+   - We only care about the result of evalArg in evalChainNode, where the formal type is always nil. In that case validateType always
+     returns argType. So we can split evalArg into two funcs, one where the formal is nil and we care about the result, and
+     one where it isn't and we don't.
    - Test a chain node with a nil, like `{{(nil).X}}`.
      The nil case in evalArg returns typ, which would be nil here, which is bad.
      I'm not sure how to generate a nil in that position; I get the error "nil
@@ -274,6 +275,7 @@ func (s *state) walkRange(dot reflect.Type, r *parse.RangeNode) {
 }
 
 func (s *state) walkTemplate(dot reflect.Type, t *parse.TemplateNode) {
+	fmt.Printf("################ walkTemplate %s\n", t.Name)
 	s.at(t)
 	tmpl := s.tmpl.Lookup(t.Name)
 	if tmpl == nil {
@@ -514,6 +516,11 @@ func (s *state) validateType(argType, formalType reflect.Type) reflect.Type {
 	if argType.Kind() == reflect.Interface {
 		return argType
 	}
+	// If the argument is numberType, be conservative and assume it can be
+	// converted to any numeric formal type.
+	if argType == numberType && isNumericType(formalType) {
+		return argType
+	}
 	// If the formal is reflect.Value, the argument will be reflected.
 	if formalType == reflectValueType {
 		return reflectValueType
@@ -533,7 +540,7 @@ func (s *state) validateType(argType, formalType reflect.Type) reflect.Type {
 // evalArg evaluates an argument to a function. It is also used (in
 // evalChainNode) to evaluation a general expression. typ is the type of the
 // formal parameter, or nil if there isn't one (as in evalChainNode).
-func (s *state) evalArg(dot reflect.Type, typ reflect.Type, n parse.Node) reflect.Type {
+func (s *state) evalArg(dot, typ reflect.Type, n parse.Node) reflect.Type {
 	s.at(n)
 	switch arg := n.(type) {
 	case *parse.DotNode:
@@ -631,6 +638,19 @@ func canBeNil(typ reflect.Type) bool {
 		return typ == reflectValueType
 	}
 	return false
+}
+
+func isNumericType(t reflect.Type) bool {
+	switch t.Kind() {
+	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
+		return true
+	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
+		return true
+	case reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128:
+		return true
+	default:
+		return false
+	}
 }
 
 func indirectType(t reflect.Type) reflect.Type {
