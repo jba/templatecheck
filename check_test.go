@@ -34,6 +34,9 @@ func TestCheck(t *testing.T) {
 		csType    = reflect.TypeOf(checkStruct{})
 		csMapType = reflect.MapOf(stringType, csType)
 	)
+	funcs := ttmpl.FuncMap{
+		"pluralize": func(i int, s string) string { return s + "s" },
+	}
 
 	for _, test := range []struct {
 		name     string
@@ -91,6 +94,8 @@ func TestCheck(t *testing.T) {
 		{"assign diffrent type", `{{$v := 1}}{{$v = ""}}{{$v.I}}`, nil, noI},
 		{"func args few", `{{and}}`, nil, "want at least 1 got 0"},
 		{"func args many", `{{le 1 2 3}}`, nil, "want 2 got 3"},
+		{"userfunc ok", `{{pluralize 3 "x"}}`, nil, ""},
+		{"userfunc", `{{pluralize 3}}`, nil, "want 2 got 1"},
 		{"len", `{{(len .).I}}`, csMapType, noI},
 		{"undefined", `{{$x = 1}}`, nil, undef}, // parser catches references, but not assignments
 		{
@@ -260,14 +265,14 @@ func TestCheck(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			tmpl, err := ttmpl.New(test.name).Parse(test.contents)
+			tmpl, err := ttmpl.New(test.name).Funcs(funcs).Parse(test.contents)
 			if err != nil {
 				t.Fatal("while parsing:", err)
 			}
 			if *debug {
 				dump(tmpl.Root, 0)
 			}
-			err = check(textTemplate{tmpl}, test.dotType)
+			err = check(textTemplate{tmpl}, test.dotType, []map[string]interface{}{funcs})
 			if err != nil {
 				if test.want == "" {
 					t.Fatalf("got %v, wanted no error", err)

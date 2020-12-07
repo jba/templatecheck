@@ -28,8 +28,8 @@ type template interface {
 	Lookup(string) template
 }
 
-func CheckText(t *ttmpl.Template, typeValue interface{}) error {
-	return check(textTemplate{t}, reflect.TypeOf(typeValue))
+func CheckText(t *ttmpl.Template, typeValue interface{}, funcMaps ...map[string]interface{}) error {
+	return check(textTemplate{t}, reflect.TypeOf(typeValue), funcMaps)
 }
 
 type textTemplate struct {
@@ -45,8 +45,8 @@ func (t textTemplate) Lookup(name string) template {
 	return nil
 }
 
-func CheckHTML(t *htmpl.Template, typeValue interface{}) error {
-	return check(htmlTemplate{t}, reflect.TypeOf(typeValue))
+func CheckHTML(t *htmpl.Template, typeValue interface{}, funcMaps ...map[string]interface{}) error {
+	return check(htmlTemplate{t}, reflect.TypeOf(typeValue), funcMaps)
 }
 
 type htmlTemplate struct {
@@ -62,8 +62,8 @@ func (t htmlTemplate) Lookup(name string) template {
 	return nil
 }
 
-func CheckSafe(t *stmpl.Template, typeValue interface{}) error {
-	return check(safeTemplate{t}, reflect.TypeOf(typeValue))
+func CheckSafe(t *stmpl.Template, typeValue interface{}, funcMaps ...map[string]interface{}) error {
+	return check(safeTemplate{t}, reflect.TypeOf(typeValue), funcMaps)
 }
 
 type safeTemplate struct {
@@ -80,58 +80,10 @@ func (t safeTemplate) Lookup(name string) template {
 }
 
 type state struct {
-	tmpl template
-	node parse.Node
-	vars []variable
-}
-
-// variable holds the type of a variable such as $, $x etc.
-type variable struct {
-	name string
-	typ  reflect.Type
-}
-
-// push pushes a new variable on the stack.
-func (s *state) push(name string, typ reflect.Type) {
-	s.vars = append(s.vars, variable{name, typ})
-}
-
-// mark returns the length of the variable stack.
-func (s *state) mark() int {
-	return len(s.vars)
-}
-
-// pop pops the variable stack up to the mark.
-func (s *state) pop(mark int) {
-	s.vars = s.vars[0:mark]
-}
-
-// setVar overwrites the last declared variable with the given name.
-// Used by variable assignments.
-func (s *state) setVar(name string, typ reflect.Type) {
-	for i := s.mark() - 1; i >= 0; i-- {
-		if s.vars[i].name == name {
-			s.vars[i].typ = typ
-			return
-		}
-	}
-	s.errorf("undefined variable: %s", name)
-}
-
-// setTopVar overwrites the top-nth variable on the stack. Used by range iterations.
-func (s *state) setTopVar(n int, typ reflect.Type) {
-	s.vars[len(s.vars)-n].typ = typ
-}
-
-// varType returns the type of the named variable.
-func (s *state) varType(name string) reflect.Type {
-	for i := s.mark() - 1; i >= 0; i-- {
-		if s.vars[i].name == name {
-			return s.vars[i].typ
-		}
-	}
-	s.errorf("undefined variable: %s", name)
-	return unknownType
+	tmpl      template
+	node      parse.Node
+	vars      []variable
+	funcTypes map[string]reflect.Type
 }
 
 type (
@@ -159,7 +111,7 @@ type checkError struct {
 	err error
 }
 
-func check(t template, dot reflect.Type) (err error) {
+func check(t template, dot reflect.Type, funcMaps []map[string]interface{}) (err error) {
 	defer func() {
 		if e := recover(); e != nil {
 			if cerr, ok := e.(checkError); ok {
@@ -174,6 +126,14 @@ func check(t template, dot reflect.Type) (err error) {
 	tree := t.Tree()
 	if tree == nil || tree.Root == nil {
 		s.errorf("%q is an incomplete or empty template", t.Name())
+	}
+	if len(funcMaps) > 0 {
+		s.funcTypes = map[string]reflect.Type{}
+		for _, m := range funcMaps {
+			for name, f := range m {
+				s.funcTypes[name] = reflect.TypeOf(f)
+			}
+		}
 	}
 
 	s.walk(dot, tree.Root)
@@ -644,6 +604,55 @@ func indirectType(t reflect.Type) reflect.Type {
 	return t
 }
 
+// variable holds the type of a variable such as $, $x etc.
+type variable struct {
+	name string
+	typ  reflect.Type
+}
+
+// push pushes a new variable on the stack.
+func (s *state) push(name string, typ reflect.Type) {
+	s.vars = append(s.vars, variable{name, typ})
+}
+
+// mark returns the length of the variable stack.
+func (s *state) mark() int {
+	return len(s.vars)
+}
+
+// pop pops the variable stack up to the mark.
+func (s *state) pop(mark int) {
+	s.vars = s.vars[0:mark]
+}
+
+// setVar overwrites the last declared variable with the given name.
+// Used by variable assignments.
+func (s *state) setVar(name string, typ reflect.Type) {
+	for i := s.mark() - 1; i >= 0; i-- {
+		if s.vars[i].name == name {
+			s.vars[i].typ = typ
+			return
+		}
+	}
+	s.errorf("undefined variable: %s", name)
+}
+
+// setTopVar overwrites the top-nth variable on the stack. Used by range iterations.
+func (s *state) setTopVar(n int, typ reflect.Type) {
+	s.vars[len(s.vars)-n].typ = typ
+}
+
+// varType returns the type of the named variable.
+func (s *state) varType(name string) reflect.Type {
+	for i := s.mark() - 1; i >= 0; i-- {
+		if s.vars[i].name == name {
+			return s.vars[i].typ
+		}
+	}
+	s.errorf("undefined variable: %s", name)
+	return unknownType
+}
+
 // at marks the state to be on node n, for error reporting.
 func (s *state) at(node parse.Node) {
 	s.node = node
@@ -709,5 +718,8 @@ var builtinFuncTypes = map[string]reflect.Type{
 
 // lookupFuncType returns the function with the given name. It returns nil if there is no such function.
 func (s *state) lookupFuncType(name string) reflect.Type {
+	if t := s.funcTypes[name]; t != nil {
+		return t
+	}
 	return builtinFuncTypes[name]
 }
