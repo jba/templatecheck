@@ -85,6 +85,7 @@ type state struct {
 	node      parse.Node
 	vars      []variable
 	funcTypes map[string]reflect.Type
+	seen      map[string]bool // template names seen, to avoid recursion
 }
 
 type (
@@ -123,7 +124,11 @@ func check(t template, dot reflect.Type, funcMaps []map[string]interface{}) (err
 		}
 	}()
 
-	s := &state{tmpl: t, vars: []variable{{"$", dot}}}
+	s := &state{
+		tmpl: t,
+		vars: []variable{{"$", dot}},
+		seen: map[string]bool{},
+	}
 	tree := t.Tree()
 	if tree == nil || tree.Root == nil {
 		s.errorf("%q is an incomplete or empty template", t.Name())
@@ -275,7 +280,10 @@ func (s *state) walkRange(dot reflect.Type, r *parse.RangeNode) {
 }
 
 func (s *state) walkTemplate(dot reflect.Type, t *parse.TemplateNode) {
-	fmt.Printf("################ walkTemplate %s\n", t.Name)
+	if s.seen[t.Name] {
+		return
+	}
+	s.seen[t.Name] = true
 	s.at(t)
 	tmpl := s.tmpl.Lookup(t.Name)
 	if tmpl == nil {

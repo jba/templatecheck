@@ -272,6 +272,16 @@ func TestCheck(t *testing.T) {
 			csType,
 			`template "bar" not defined`,
 		},
+		{
+			"recursion",
+			`
+				{{define "foos"}}{{if .}}{{template "foo" .P}}{{end}}{{end}}
+				{{define "foo"}}{{.I}}{{template "foos" .P}}{{end}}
+				{{template "foos" .}}
+			`,
+			csType,
+			"",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			tmpl, err := ttmpl.New(test.name).Funcs(funcs).Parse(test.contents)
