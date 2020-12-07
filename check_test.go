@@ -7,7 +7,7 @@ import (
 	"reflect"
 	"strings"
 	"testing"
-	"text/template"
+	ttmpl "text/template"
 	"text/template/parse"
 )
 
@@ -260,14 +260,14 @@ func TestCheck(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			tmpl, err := template.New(test.name).Parse(test.contents)
+			tmpl, err := ttmpl.New(test.name).Parse(test.contents)
 			if err != nil {
 				t.Fatal("while parsing:", err)
 			}
 			if *debug {
 				dump(tmpl.Root, 0)
 			}
-			err = Check(tmpl, test.dotType)
+			err = check(textTemplate{tmpl}, test.dotType)
 			if err != nil {
 				if test.want == "" {
 					t.Fatalf("got %v, wanted no error", err)

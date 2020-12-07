@@ -13,14 +13,74 @@ package templatecheck
 
 import (
 	"fmt"
+	htmpl "html/template"
 	"reflect"
 	"strings"
-	"text/template"
+	ttmpl "text/template"
 	"text/template/parse"
+
+	stmpl "github.com/google/safehtml/template"
 )
 
+type template interface {
+	Name() string
+	Tree() *parse.Tree
+	Lookup(string) template
+}
+
+func CheckText(t *ttmpl.Template, typeValue interface{}) error {
+	return check(textTemplate{t}, reflect.TypeOf(typeValue))
+}
+
+type textTemplate struct {
+	tmpl *ttmpl.Template
+}
+
+func (t textTemplate) Name() string      { return t.tmpl.Name() }
+func (t textTemplate) Tree() *parse.Tree { return t.tmpl.Tree }
+func (t textTemplate) Lookup(name string) template {
+	if u := t.tmpl.Lookup(name); u != nil {
+		return textTemplate{u}
+	}
+	return nil
+}
+
+func CheckHTML(t *htmpl.Template, typeValue interface{}) error {
+	return check(htmlTemplate{t}, reflect.TypeOf(typeValue))
+}
+
+type htmlTemplate struct {
+	tmpl *htmpl.Template
+}
+
+func (t htmlTemplate) Name() string      { return t.tmpl.Name() }
+func (t htmlTemplate) Tree() *parse.Tree { return t.tmpl.Tree }
+func (t htmlTemplate) Lookup(name string) template {
+	if u := t.tmpl.Lookup(name); u != nil {
+		return htmlTemplate{u}
+	}
+	return nil
+}
+
+func CheckSafe(t *stmpl.Template, typeValue interface{}) error {
+	return check(safeTemplate{t}, reflect.TypeOf(typeValue))
+}
+
+type safeTemplate struct {
+	tmpl *stmpl.Template
+}
+
+func (t safeTemplate) Name() string      { return t.tmpl.Name() }
+func (t safeTemplate) Tree() *parse.Tree { return t.tmpl.Tree }
+func (t safeTemplate) Lookup(name string) template {
+	if u := t.tmpl.Lookup(name); u != nil {
+		return safeTemplate{u}
+	}
+	return nil
+}
+
 type state struct {
-	tmpl *template.Template
+	tmpl template
 	node parse.Node
 	vars []variable
 }
@@ -99,7 +159,7 @@ type checkError struct {
 	err error
 }
 
-func Check(t *template.Template, dot reflect.Type) (err error) {
+func check(t template, dot reflect.Type) (err error) {
 	defer func() {
 		if e := recover(); e != nil {
 			if cerr, ok := e.(checkError); ok {
@@ -111,10 +171,12 @@ func Check(t *template.Template, dot reflect.Type) (err error) {
 	}()
 
 	s := &state{tmpl: t, vars: []variable{{"$", dot}}}
-	if t.Tree == nil || t.Root == nil {
+	tree := t.Tree()
+	if tree == nil || tree.Root == nil {
 		s.errorf("%q is an incomplete or empty template", t.Name())
 	}
-	s.walk(dot, t.Root)
+
+	s.walk(dot, tree.Root)
 	return nil
 }
 
@@ -257,7 +319,7 @@ func (s *state) walkTemplate(dot reflect.Type, t *parse.TemplateNode) {
 	newState.tmpl = tmpl
 	// No dynamic scoping: template invocations inherit no variables.
 	newState.vars = []variable{{"$", dot}}
-	newState.walk(dot, tmpl.Root)
+	newState.walk(dot, tmpl.Tree().Root)
 }
 
 func (s *state) evalPipeline(dot reflect.Type, pipe *parse.PipeNode) reflect.Type {
@@ -593,7 +655,7 @@ func (s *state) errorf(format string, args ...interface{}) {
 	if s.node == nil {
 		format = fmt.Sprintf("template: %s: %s", name, format)
 	} else {
-		location, context := s.tmpl.ErrorContext(s.node)
+		location, context := s.tmpl.Tree().ErrorContext(s.node)
 		format = fmt.Sprintf("template: %s: checking %q at <%s>: %s", location, name, doublePercent(context), format)
 	}
 	panic(checkError{fmt.Errorf(format, args...)})
@@ -614,7 +676,7 @@ var builtinFuncTypes = map[string]reflect.Type{
 		[]reflect.Type{reflectValueType, reflect.SliceOf(reflectValueType)},
 		[]reflect.Type{reflectValueType, errorType},
 		true),
-	"html": reflect.TypeOf(template.HTMLEscaper),
+	"html": reflect.TypeOf(ttmpl.HTMLEscaper),
 	// TODO: Use more knowledge about index and slice.
 	"index": reflect.FuncOf(
 		[]reflect.Type{reflectValueType, reflect.SliceOf(reflectValueType)},
@@ -624,13 +686,13 @@ var builtinFuncTypes = map[string]reflect.Type{
 		[]reflect.Type{reflectValueType, reflect.SliceOf(numberType)},
 		[]reflect.Type{reflectValueType, errorType},
 		true),
-	"js":       reflect.TypeOf(template.JSEscaper),
+	"js":       reflect.TypeOf(ttmpl.JSEscaper),
 	"len":      reflect.TypeOf(func(reflect.Value) (int, error) { return 0, nil }),
 	"not":      reflect.TypeOf(func(reflect.Value) bool { return false }),
 	"print":    reflect.TypeOf(fmt.Sprint),
 	"printf":   reflect.TypeOf(fmt.Sprintf),
 	"println":  reflect.TypeOf(fmt.Sprintln),
-	"urlquery": reflect.TypeOf(template.URLQueryEscaper),
+	"urlquery": reflect.TypeOf(ttmpl.URLQueryEscaper),
 
 	// Comparisons
 	// TODO: Use more knowledge about comparison functions.
