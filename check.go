@@ -581,28 +581,34 @@ func (s *state) checkArg(dot, typ reflect.Type, n parse.Node) {
 	}
 	switch typ.Kind() {
 	case reflect.Bool:
-		_, ok := n.(*parse.BoolNode)
-		s.checkPrim(typ, n, ok)
+		if _, ok := n.(*parse.BoolNode); !ok {
+			s.wrongTypeErr(typ, n)
+		}
 		return
 	case reflect.String:
-		_, ok := n.(*parse.StringNode)
-		s.checkPrim(typ, n, ok)
+		if _, ok := n.(*parse.StringNode); !ok {
+			s.wrongTypeErr(typ, n)
+		}
 		return
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		nn, ok := n.(*parse.NumberNode)
-		s.checkPrim(typ, n, ok && nn.IsInt)
+		if nn, ok := n.(*parse.NumberNode); !ok || !nn.IsInt {
+			s.wrongTypeErr(typ, n)
+		}
 		return
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		nn, ok := n.(*parse.NumberNode)
-		s.checkPrim(typ, n, ok && nn.IsUint)
+		if nn, ok := n.(*parse.NumberNode); !ok || !nn.IsUint {
+			s.wrongTypeErr(typ, n)
+		}
 		return
 	case reflect.Float32, reflect.Float64:
-		nn, ok := n.(*parse.NumberNode)
-		s.checkPrim(typ, n, ok && nn.IsFloat)
+		if nn, ok := n.(*parse.NumberNode); !ok || !nn.IsFloat {
+			s.wrongTypeErr(typ, n)
+		}
 		return
 	case reflect.Complex64, reflect.Complex128:
-		nn, ok := n.(*parse.NumberNode)
-		s.checkPrim(typ, n, ok && nn.IsComplex)
+		if nn, ok := n.(*parse.NumberNode); !ok || !nn.IsComplex {
+			s.wrongTypeErr(typ, n)
+		}
 		return
 	case reflect.Interface:
 		if typ.NumMethod() == 0 {
@@ -617,11 +623,9 @@ func (s *state) checkArg(dot, typ reflect.Type, n parse.Node) {
 	s.errorf("can't handle %s for arg of type %s", n, typ)
 }
 
-func (s *state) checkPrim(formalType reflect.Type, n parse.Node, ok bool) {
+func (s *state) wrongTypeErr(typ reflect.Type, n parse.Node) {
 	s.at(n)
-	if !ok {
-		s.errorf("wrong type: expected %s; found %s", formalType, n)
-	}
+	s.errorf("wrong type: expected %s; found %s", typ, n)
 }
 
 func (s *state) checkEmptyInterface(dot reflect.Type, n parse.Node) {
