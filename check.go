@@ -1,7 +1,12 @@
 /* TODO
    - Increase coverage.
+   - More overview doc.
 */
 
+// Package templatecheck checks Go templates for problems. It can detect many
+// errors that would only manifest themselves when the template was executed. By
+// using templatecheck just after parsing, a program can find errors early in
+// its execution, and along execution paths that might only rarely be reached.
 package templatecheck
 
 import (
@@ -21,6 +26,10 @@ type template interface {
 	Lookup(string) template
 }
 
+// CheckText checks a text/template for problems. The second argument is the
+// type of dot passed to template.Execute. The remaining arguments are the
+// FuncMaps passed to Template.Funcs (due to a limitation in the template
+// package, templatecheck cannot retrieve these from the template.)
 func CheckText(t *ttmpl.Template, typeValue interface{}, funcMaps ...map[string]interface{}) error {
 	return check(textTemplate{t}, reflect.TypeOf(typeValue), funcMaps)
 }
@@ -38,6 +47,7 @@ func (t textTemplate) Lookup(name string) template {
 	return nil
 }
 
+// CheckHTML checks an html/template for problems. See CheckText for details.
 func CheckHTML(t *htmpl.Template, typeValue interface{}, funcMaps ...map[string]interface{}) error {
 	return check(htmlTemplate{t}, reflect.TypeOf(typeValue), funcMaps)
 }
@@ -55,6 +65,7 @@ func (t htmlTemplate) Lookup(name string) template {
 	return nil
 }
 
+// CheckSafe checks a github.com/google/safehtml/template for problems. See CheckText for details.
 func CheckSafe(t *stmpl.Template, typeValue interface{}, funcMaps ...map[string]interface{}) error {
 	return check(safeTemplate{t}, reflect.TypeOf(typeValue), funcMaps)
 }
@@ -105,6 +116,11 @@ type checkError struct {
 	err error
 }
 
+// check does the actual work. Its structure mirrors that of the template
+// interpreter in text/template/exec.go. Much of the code was copied from there
+// and other parts of the text/template implementation, and heavily modified.
+// Roughly speaking, the changes involved replacing reflect.Value with
+// reflect.Type.
 func check(t template, dot reflect.Type, funcMaps []map[string]interface{}) (err error) {
 	defer func() {
 		if e := recover(); e != nil {
