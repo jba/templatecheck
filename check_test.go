@@ -15,6 +15,7 @@ var debug = flag.Bool("debug", false, "display extra debug output")
 
 type checkStruct struct {
 	B     bool
+	Bs    []byte
 	I     int
 	P     *checkStruct
 	R     io.Reader
@@ -35,7 +36,8 @@ func TestCheck(t *testing.T) {
 		csMapType = reflect.MapOf(stringType, csType)
 	)
 	funcs := ttmpl.FuncMap{
-		"pluralize": func(i int, s string) string { return s + "s" },
+		"pluralize": func(i int, s string) string { return "" },
+		"variadic":  func(x int, ys ...string) string { return "" },
 	}
 
 	for _, test := range []struct {
@@ -50,11 +52,11 @@ func TestCheck(t *testing.T) {
 		{"no field ptr", `{{.X}}`, reflect.PtrTo(csType), noX},
 		{"unexported", `{{.unexp}}`, csType, "unexported field"},
 		{"method ok", `{{.Add 1}}`, csType, ""},
-		{"method too few", `{{.Add}}`, csType, "want 1 got 0"},
-		{"method too many", `{{.Add 1 2}}`, csType, "want 1 got 2"},
-		{"method interface ok", `{{.R.Read 1}}`, csType, ""},
-		{"method interface too few", `{{.R.Read}}`, csType, "want 1 got 0"},
-		{"method interface too many", `{{.R.Read 1 true ""}}`, csType, "want 1 got 3"},
+		{"method too few", `{{.Add}}`, csType, "want 1, got 0"},
+		{"method too many", `{{.Add 1 2}}`, csType, "want 1, got 2"},
+		{"method interface ok", `{{.R.Read .Bs}}`, csType, ""},
+		{"method interface too few", `{{.R.Read}}`, csType, "want 1, got 0"},
+		{"method interface too many", `{{.R.Read 1 true ""}}`, csType, "want 1, got 3"},
 		{"not a struct", `{{.B.I}}`, csType, noI},
 		{"not a func", `{{.I 1}}`, csType, "cannot be invoked"},
 		{"nested", `{{.P.P.P.X}}`, csType, noX},
@@ -81,7 +83,7 @@ func TestCheck(t *testing.T) {
 		{"range chan send", `{{range .}}{{end}}`, reflect.ChanOf(reflect.SendDir, csType), "over send-only channel"},
 		{"range one var", `{{range $e := .}}{{$e.X}}{{end}}`, reflect.SliceOf(csType), noX},
 		{"range two vars", `{{range $k, $e := .}}{{$e.X}}{{end}}`, reflect.MapOf(stringType, csType), noX},
-		{"range two vars 2", `{{range $k, $e := .}}{{$k.X}}{{end}}`, reflect.MapOf(csType, stringType), noX},
+		{"range two vars 2", `{{range $k, $e := .}}{{$k.I}}{{end}}`, reflect.MapOf(boolType, stringType), noI},
 		{"range bad type", `{{range 1}}{{end}}`, nil, "can't iterate over type"},
 		{"chain ok", `{{(.P).I}}`, csType, ""},
 		{"chain bool", `{{(true).I}}`, csType, noI},
@@ -92,11 +94,14 @@ func TestCheck(t *testing.T) {
 		{"chain pipe", `{{((.B) | printf).I}}`, csType, noI},
 		{"assign same type", `{{$v := 1}}{{$v = 2}}{{$v.I}}`, nil, noI},
 		{"assign diffrent type", `{{$v := 1}}{{$v = ""}}{{$v.I}}`, nil, noI},
-		{"func args few", `{{and}}`, nil, "want at least 1 got 0"},
-		{"func args many", `{{le 1 2 3}}`, nil, "want 2 got 3"},
-		{"userfunc ok", `{{pluralize 3 "x"}}`, nil, ""},
-		{"userfunc", `{{pluralize 3}}`, nil, "want 2 got 1"},
+		{"func args few", `{{and}}`, nil, "want at least 1, got 0"},
+		{"func args many", `{{le 1 2 3}}`, nil, "want 2, got 3"},
 		{"len", `{{(len .).I}}`, csMapType, noI},
+		{"len arg too many", `{{pluralize (len 1 2) .}}`, csMapType, "want 1, got 2"},
+		{"userfunc ok", `{{pluralize 3 "x"}}`, nil, ""},
+		{"userfunc too few", `{{pluralize 3}}`, nil, "want 2, got 1"},
+		{"userfunc wrong type", `{{pluralize (pluralize 1 "x") "y"}}`, nil, "expected int; found string"},
+		{"variadic", `{{variadic 1 2}}`, nil, "expected string; found 2"},
 		{"undefined", `{{$x = 1}}`, nil, undef}, // parser catches references, but not assignments
 		{
 			"nested decl", // variable redeclared in an inner scope; doesn't affect outer scope

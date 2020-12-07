@@ -457,7 +457,7 @@ func (s *state) evalVariableNode(dot reflect.Type, variable *parse.VariableNode,
 // evalCall checks  a function or method call. If it's a method, fun already has the receiver bound, so
 // it looks just like a function call. The arg list, if non-nil, includes (in the manner of the shell), arg[0]
 // as the function itself.
-func (s *state) evalCall(dot, funType reflect.Type, node parse.Node, name string, args []parse.Node, final reflect.Type) reflect.Type {
+func (s *state) evalCall(dot, typ reflect.Type, node parse.Node, name string, args []parse.Node, final reflect.Type) reflect.Type {
 	if args != nil {
 		args = args[1:] // Zeroth arg is function name/node; not passed to function.
 	}
@@ -466,29 +466,58 @@ func (s *state) evalCall(dot, funType reflect.Type, node parse.Node, name string
 		numIn++
 	}
 	numFixed := len(args)
-	if funType.IsVariadic() {
-		numFixed = funType.NumIn() - 1 // last arg is the variadic one.
+	if typ.IsVariadic() {
+		numFixed = typ.NumIn() - 1 // last arg is the variadic one.
 		if numIn < numFixed {
-			s.errorf("wrong number of args for %s: want at least %d got %d", name, funType.NumIn()-1, len(args))
+			s.errorf("wrong number of args for %s: want at least %d, got %d", name, typ.NumIn()-1, len(args))
 		}
-	} else if numIn != funType.NumIn() {
-		s.errorf("wrong number of args for %s: want %d got %d", name, funType.NumIn(), numIn)
+	} else if numIn != typ.NumIn() {
+		s.errorf("wrong number of args for %s: want %d, got %d", name, typ.NumIn(), numIn)
 	}
-	// TODO: check args (see rest of evalCall in text/template/exec.go).
-	return funType.Out(0)
+	// Args must be checked. Fixed args first.
+	i := 0
+	for ; i < numFixed && i < len(args); i++ {
+		_ = s.evalArg(dot, typ.In(i), args[i])
+	}
+	// Now the ... args.
+	if typ.IsVariadic() {
+		argType := typ.In(typ.NumIn() - 1).Elem() // Argument is a slice.
+		for ; i < len(args); i++ {
+			_ = s.evalArg(dot, argType, args[i])
+		}
+	}
+
+	return typ.Out(0)
 }
 
 // validateType guarantees that the argument type is assignable to the formal type.
 func (s *state) validateType(argType, formalType reflect.Type) reflect.Type {
+	// If we don't know the formal's type, assume we can assign.
 	if formalType == nil || formalType == unknownType {
 		return argType
 	}
 	if argType.AssignableTo(formalType) {
 		return argType
 	}
-	// There is more we need to do here -- see validateType in text/template/exec.go --
-	// but punt for now.
-	return argType
+	// If the argument is of interface type, we can't tell here whether the
+	// assignment will succeed. Be conservative.
+	if argType.Kind() == reflect.Interface {
+		return argType
+	}
+	// If the formal is reflect.Value, the argument will be reflected.
+	if formalType == reflectValueType {
+		return reflectValueType
+	}
+	// If the argument is a pointer, it will be dereferenced.
+	if argType.Kind() == reflect.Ptr && argType.Elem().AssignableTo(formalType) {
+		return argType.Elem()
+	}
+	// If a pointer to the argument is assignable, then its address will be taken.
+	if pt := reflect.PtrTo(argType); pt.AssignableTo(formalType) {
+		return pt
+	}
+	s.errorf("wrong type: expected %s; found %s", formalType, argType)
+	panic("not reached")
 }
 
 // evalArg evaluates an argument to a function. It is also used (in
@@ -552,7 +581,7 @@ func (s *state) evalPrim(formalType reflect.Type, n parse.Node, ok bool) reflect
 	if ok {
 		return formalType
 	}
-	s.errorf("expected %s; found %s", formalType, n)
+	s.errorf("wrong type: expected %s; found %s", formalType, n)
 	panic("not reached")
 }
 
