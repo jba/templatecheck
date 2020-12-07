@@ -1,9 +1,5 @@
 /* TODO
    - Increase coverage.
-   - Look at chain nodes that occur as operands. See template/parse/parse.go:Tree.operand.
-   - We only care about the result of evalArg in evalChainNode, where the formal type is always nil. In that case validateType always
-     returns argType. So we can split evalArg into two funcs, one where the formal is nil and we care about the result, and
-     one where it isn't and we don't.
    - Test a chain node with a nil, like `{{(nil).X}}`.
      The nil case in evalArg returns typ, which would be nil here, which is bad.
      I'm not sure how to generate a nil in that position; I get the error "nil
@@ -376,6 +372,7 @@ func (s *state) evalFieldChain(dot, receiver reflect.Type, node parse.Node, iden
 }
 
 func (s *state) evalFunction(dot reflect.Type, node *parse.IdentifierNode, cmd parse.Node, args []parse.Node, final reflect.Type) reflect.Type {
+	fmt.Printf("#### evalFunction %s, args: %v, final %v\n", node.Ident, args, final)
 	s.at(node)
 	name := node.Ident
 	ft := s.lookupFuncType(name)
@@ -459,8 +456,21 @@ func (s *state) evalChainNode(dot reflect.Type, chain *parse.ChainNode, args []p
 		s.errorf("indirection through explicit nil in %s", chain)
 	}
 	// (pipe).Field1.Field2 has pipe as .Node, fields as .Field. Eval the pipeline, then the fields.
-	pipe := s.evalArg(dot, nil, chain.Node)
+	// The only other possibility is ident.Field1..., that is, a nilary function call.
+	pipe := s.evalChainNode1(dot, chain.Node)
 	return s.evalFieldChain(dot, pipe, chain, chain.Field, args, final)
+}
+
+func (s *state) evalChainNode1(dot reflect.Type, n parse.Node) reflect.Type {
+	switch n := n.(type) {
+	case *parse.PipeNode:
+		return s.evalPipeline(dot, n)
+	case *parse.IdentifierNode:
+		return s.evalFunction(dot, n, n, nil, nil)
+	default:
+		s.errorf("internal error: chain.Node has type %T, not PipeNode or IdentifierNode", n)
+	}
+	panic("not reached")
 }
 
 func (s *state) evalVariableNode(dot reflect.Type, variable *parse.VariableNode, args []parse.Node, final reflect.Type) reflect.Type {
@@ -497,13 +507,13 @@ func (s *state) evalCall(dot, typ reflect.Type, node parse.Node, name string, ar
 	// Args must be checked. Fixed args first.
 	i := 0
 	for ; i < numFixed && i < len(args); i++ {
-		_ = s.evalArg(dot, typ.In(i), args[i])
+		s.checkArg(dot, typ.In(i), args[i])
 	}
 	// Now the ... args.
 	if typ.IsVariadic() {
 		argType := typ.In(typ.NumIn() - 1).Elem() // Argument is a slice.
 		for ; i < len(args); i++ {
-			_ = s.evalArg(dot, argType, args[i])
+			s.checkArg(dot, argType, args[i])
 		}
 	}
 
@@ -511,103 +521,111 @@ func (s *state) evalCall(dot, typ reflect.Type, node parse.Node, name string, ar
 }
 
 // validateType guarantees that the argument type is assignable to the formal type.
-func (s *state) validateType(argType, formalType reflect.Type) reflect.Type {
+func (s *state) validateType(argType, formalType reflect.Type) {
 	// If we don't know the formal or arg's type, assume we can assign.
 	if formalType == nil || formalType == unknownType || argType == unknownType {
-		return argType
+		return
 	}
 	if argType.AssignableTo(formalType) {
-		return argType
+		return
 	}
 	// If the argument is of interface type, we can't tell here whether the
 	// assignment will succeed. Be conservative.
 	if argType.Kind() == reflect.Interface {
-		return argType
+		return
 	}
 	// If the argument is numberType, be conservative and assume it can be
 	// converted to any numeric formal type.
 	if argType == numberType && isNumericType(formalType) {
-		return argType
+		return
 	}
 	// If the formal is reflect.Value, the argument will be reflected.
 	if formalType == reflectValueType {
-		return reflectValueType
+		return
 	}
 	// If the argument is a pointer, it will be dereferenced.
 	if argType.Kind() == reflect.Ptr && argType.Elem().AssignableTo(formalType) {
-		return argType.Elem()
+		return
 	}
 	// If a pointer to the argument is assignable, then its address will be taken.
 	if pt := reflect.PtrTo(argType); pt.AssignableTo(formalType) {
-		return pt
+		return
 	}
 	s.errorf("wrong type: expected %s; found %s", formalType, argType)
-	panic("not reached")
 }
 
-// evalArg evaluates an argument to a function. It is also used (in
-// evalChainNode) to evaluation a general expression. typ is the type of the
-// formal parameter, or nil if there isn't one (as in evalChainNode).
-func (s *state) evalArg(dot, typ reflect.Type, n parse.Node) reflect.Type {
+// checkArg checks an argument to a function. typ is the type of the formal
+// parameter.
+func (s *state) checkArg(dot, typ reflect.Type, n parse.Node) {
 	s.at(n)
 	switch arg := n.(type) {
 	case *parse.DotNode:
-		return s.validateType(dot, typ)
+		s.validateType(dot, typ)
+		return
 	case *parse.NilNode:
-		if canBeNil(typ) {
-			return typ
+		if !canBeNil(typ) {
+			s.errorf("cannot assign nil to %s", typ)
 		}
-		s.errorf("cannot assign nil to %s", typ)
+		return
 	case *parse.FieldNode:
-		return s.validateType(s.evalFieldNode(dot, arg, []parse.Node{n}, nil), typ)
+		s.validateType(s.evalFieldNode(dot, arg, []parse.Node{n}, nil), typ)
+		return
 	case *parse.VariableNode:
-		return s.validateType(s.evalVariableNode(dot, arg, nil, nil), typ)
+		s.validateType(s.evalVariableNode(dot, arg, nil, nil), typ)
+		return
 	case *parse.PipeNode:
-		return s.validateType(s.evalPipeline(dot, arg), typ)
+		s.validateType(s.evalPipeline(dot, arg), typ)
+		return
 	case *parse.IdentifierNode:
-		return s.validateType(s.evalFunction(dot, arg, arg, nil, unknownType), typ)
+		s.validateType(s.evalFunction(dot, arg, arg, nil, unknownType), typ)
+		return
 	case *parse.ChainNode:
-		return s.validateType(s.evalChainNode(dot, arg, nil, nil), typ)
+		s.validateType(s.evalChainNode(dot, arg, nil, nil), typ)
+		return
 	}
 	switch typ.Kind() {
 	case reflect.Bool:
 		_, ok := n.(*parse.BoolNode)
-		return s.evalPrim(typ, n, ok)
+		s.checkPrim(typ, n, ok)
+		return
 	case reflect.String:
 		_, ok := n.(*parse.StringNode)
-		return s.evalPrim(typ, n, ok)
+		s.checkPrim(typ, n, ok)
+		return
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		nn, ok := n.(*parse.NumberNode)
-		return s.evalPrim(typ, n, ok && nn.IsInt)
+		s.checkPrim(typ, n, ok && nn.IsInt)
+		return
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		nn, ok := n.(*parse.NumberNode)
-		return s.evalPrim(typ, n, ok && nn.IsUint)
+		s.checkPrim(typ, n, ok && nn.IsUint)
+		return
 	case reflect.Float32, reflect.Float64:
 		nn, ok := n.(*parse.NumberNode)
-		return s.evalPrim(typ, n, ok && nn.IsFloat)
+		s.checkPrim(typ, n, ok && nn.IsFloat)
+		return
 	case reflect.Complex64, reflect.Complex128:
 		nn, ok := n.(*parse.NumberNode)
-		return s.evalPrim(typ, n, ok && nn.IsComplex)
+		s.checkPrim(typ, n, ok && nn.IsComplex)
+		return
 	case reflect.Interface:
 		if typ.NumMethod() == 0 {
-			return s.evalEmptyInterface(dot, n)
+			s.evalEmptyInterface(dot, n)
 		}
+		return
 	case reflect.Struct:
 		if typ == reflectValueType {
-			return reflectValueType
+			return
 		}
 	}
 	s.errorf("can't handle %s for arg of type %s", n, typ)
-	panic("not reached")
 }
 
-func (s *state) evalPrim(formalType reflect.Type, n parse.Node, ok bool) reflect.Type {
+func (s *state) checkPrim(formalType reflect.Type, n parse.Node, ok bool) {
 	s.at(n)
-	if ok {
-		return formalType
+	if !ok {
+		s.errorf("wrong type: expected %s; found %s", formalType, n)
 	}
-	s.errorf("wrong type: expected %s; found %s", formalType, n)
-	panic("not reached")
 }
 
 func (s *state) evalEmptyInterface(dot reflect.Type, n parse.Node) reflect.Type {

@@ -38,6 +38,7 @@ func TestCheck(t *testing.T) {
 	funcs := ttmpl.FuncMap{
 		"pluralize": func(i int, s string) string { return "" },
 		"variadic":  func(x int, ys ...string) string { return "" },
+		"nilary":    func() *checkStruct { return nil },
 	}
 
 	for _, test := range []struct {
@@ -95,6 +96,8 @@ func TestCheck(t *testing.T) {
 		{"chain map ok", `{{(.K).I}}`, csMapType, ""},
 		{"chain map", `{{(.K).X}}`, csMapType, noX},
 		{"chain pipe", `{{((.B) | printf).I}}`, csType, noI},
+		{"chain ident ok", `{{nilary.P.I}}`, nil, ""},
+		{"chain ident", `{{nilary.P.X}}`, nil, noX},
 		{"assign same type", `{{$v := 1}}{{$v = 2}}{{$v.I}}`, nil, noI},
 		{"assign diffrent type", `{{$v := 1}}{{$v = ""}}{{$v.I}}`, nil, noI},
 		{"func args few", `{{and}}`, nil, "want at least 1, got 0"},
@@ -106,6 +109,7 @@ func TestCheck(t *testing.T) {
 		{"userfunc wrong type", `{{pluralize (pluralize 1 "x") "y"}}`, nil, "expected int; found string"},
 		{"variadic", `{{variadic 1 2}}`, nil, "expected string; found 2"},
 		{"var arg", `{{$v := 1}}{{pluralize $v "x"}}`, nil, ""},
+		{"nil arg", `{{pluralize nil "x"}}`, nil, "cannot assign nil to int"},
 		{"undefined", `{{$x = 1}}`, nil, undef}, // parser catches references, but not assignments
 		{
 			"nested decl", // variable redeclared in an inner scope; doesn't affect outer scope
@@ -289,6 +293,7 @@ func TestCheck(t *testing.T) {
 				t.Fatal("while parsing:", err)
 			}
 			if *debug {
+				fmt.Printf("%s =>\n", test.contents)
 				dump(tmpl.Root, 0)
 			}
 			err = check(textTemplate{tmpl}, test.dotType, []map[string]interface{}{funcs})
@@ -312,23 +317,26 @@ func dump(n parse.Node, level int) {
 	}
 	fmt.Printf("%T", n)
 	switch n := n.(type) {
+	case *parse.ActionNode:
+		fmt.Println()
+		dump(n.Pipe, level+1)
+	case *parse.ChainNode:
+		fmt.Printf(" %q\n", n.Field)
+		dump(n.Node, level+1)
+	case *parse.CommandNode:
+		fmt.Println()
+		for _, arg := range n.Args {
+			dump(arg, level+1)
+		}
 	case *parse.ListNode:
 		fmt.Println()
 		for _, c := range n.Nodes {
 			dump(c, level+1)
 		}
-	case *parse.ActionNode:
-		fmt.Println()
-		dump(n.Pipe, level+1)
 	case *parse.PipeNode:
 		fmt.Printf(" IsAssign: %t, decl: %v\n", n.IsAssign, n.Decl)
 		for _, c := range n.Cmds {
 			dump(c, level+1)
-		}
-	case *parse.CommandNode:
-		fmt.Println()
-		for _, arg := range n.Args {
-			dump(arg, level+1)
 		}
 	case *parse.VariableNode:
 		fmt.Printf(" %q\n", n.Ident)
