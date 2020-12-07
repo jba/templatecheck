@@ -229,6 +229,9 @@ func (s *state) walkRange(dot reflect.Type, r *parse.RangeNode) {
 	defer s.pop(origMark)
 	typ := indirectType(s.evalPipeline(dot, r.Pipe))
 
+	if typ == unknownType {
+		return
+	}
 	// mark top of stack before any variables in the body are pushed.
 	mark := s.mark()
 	checkBody := func(index, elem reflect.Type) []variable {
@@ -258,6 +261,9 @@ func (s *state) walkRange(dot reflect.Type, r *parse.RangeNode) {
 		rangeVars = checkBody(intType, typ.Elem())
 	case reflect.Invalid:
 		// An invalid value is likely a nil map, etc. and acts like an empty map.
+	case reflect.Interface:
+		// We can't assume anything about an interface type.
+		return
 	default:
 		s.errorf("range can't iterate over type %v", typ)
 	}
@@ -496,8 +502,8 @@ func (s *state) evalCall(dot, typ reflect.Type, node parse.Node, name string, ar
 
 // validateType guarantees that the argument type is assignable to the formal type.
 func (s *state) validateType(argType, formalType reflect.Type) reflect.Type {
-	// If we don't know the formal's type, assume we can assign.
-	if formalType == nil || formalType == unknownType {
+	// If we don't know the formal or arg's type, assume we can assign.
+	if formalType == nil || formalType == unknownType || argType == unknownType {
 		return argType
 	}
 	if argType.AssignableTo(formalType) {

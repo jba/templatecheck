@@ -86,6 +86,8 @@ func TestCheck(t *testing.T) {
 		{"range two vars", `{{range $k, $e := .}}{{$e.X}}{{end}}`, reflect.MapOf(stringType, csType), noX},
 		{"range two vars 2", `{{range $k, $e := .}}{{$k.I}}{{end}}`, reflect.MapOf(boolType, stringType), noI},
 		{"range bad type", `{{range 1}}{{end}}`, nil, "can't iterate over type"},
+		{"range unknown", `{{range .}}{{end}}`, unknownType, ""},
+		{"range iface", `{{range .}}{{end}}`, emptyInterfaceType, ""},
 		{"chain ok", `{{(.P).I}}`, csType, ""},
 		{"chain bool", `{{(true).I}}`, csType, noI},
 		{"chain no field", `{{(.P).X}}`, csType, noX},
