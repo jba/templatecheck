@@ -6,86 +6,6 @@
    - Increase coverage.
 */
 
-// Package templatecheck checks Go templates for problems. It can detect many
-// errors that are normally caught only during execution. By using templatecheck
-// just after parsing, a program can find errors early in its lifetime, and
-// along template execution paths that might only rarely be reached.
-//
-// To use templatecheck on a template, that template must be invoked with the
-// same Go type each time. Passing that type to templatecheck gives it
-// enough information to verify that all the field references in the template
-// are valid. templatecheck can also verify that functions are called with the
-// right number of types of arguments, that the argument to a range statement
-// can actually be ranged over, and a few other things.
-//
-// Consider a web server that parses a template for its home page:
-//
-//   import "html/template"
-//
-//   var tmpl = template.Must(template.ParseFiles("index.tmpl"))
-//
-//   type homePage struct { ... }
-//
-//   func handler(w http.ResponseWriter, r *http.Request) {
-//       ...
-//       var buf bytes.Buffer
-//       err := tmpl.Execute(&buf, homePage{...})
-//       ...
-//   }
-//
-// Use templatecheck to catch errors in tests, instead of during serving:
-//
-//   func TestTemplates(t *testing.T) {
-//       if err := templatecheck.CheckHTML(tmpl, homePage{}); err != nil {
-//           t.Fatal(err)
-//       }
-//   }
-//
-//
-// Template Functions
-//
-// Due to a limitation in the template packages, functions passed to templates
-// must also be passed to templatecheck:
-//
-//   funcs := template.FuncMap{...}
-//   t := template.Must(template.New("").Funcs(funcs).Parse(...))
-//   err := templatecheck.CheckText(t, data{}, funcs)
-//
-//
-// Checking Associated Templates
-//
-// To check associated templates, use Template.Lookup. This can be necessary
-// if full type information isn't available to the main template.
-//
-// For example, here the base template is always invoked with a basePage,
-// but the type of its Details field differs depending on the value of IsTop.
-//
-//   type basePage struct {
-//       IsTop bool
-//       Details interface{}
-//   }
-//
-//   type topDetails ...
-//   type bottomDetails ...
-//
-// The template text is
-//   {{if .IsTop}}
-//     {{template "top" .Details}}
-//   {{else}}
-//     {{template "bottom" .Details}}
-//   {{end}}
-//
-//   {{define "top"}}...{{end}}
-//   {{define "bottom"}}...{{end}}
-//
-// Checking only the main template will not provide much information about the
-// two associated templates, because their data types are unknown. All three
-// templates should be checked, like so:
-//
-//   t := template.Must(template.New("").Parse(base))
-//   if err := templatecheck.CheckText(t, basePage{}) ...
-//   if err := templatecheck.CheckText(t.Lookup("top"), topDetails{}) ...
-//   if err := templatecheck.CheckText(t.Lookup("bottom"), bottomDetails{}) ...
 package templatecheck
 
 import (
@@ -107,8 +27,9 @@ type template interface {
 
 // CheckHTML checks an html/template for problems. The second argument is the
 // type of dot passed to template.Execute. The remaining arguments are the
-// FuncMaps passed to Template.Funcs (due to a limitation in the template
-// package, templatecheck cannot retrieve these from the template.)
+// FuncMaps passed to Template.Funcs. (Due to a limitation in the template
+// package, templatecheck cannot retrieve these from the template; see
+// https://golang.org/issue/43062.)
 func CheckHTML(t *htmpl.Template, typeValue interface{}, funcMaps ...map[string]interface{}) error {
 	return check(htmlTemplate{t}, reflect.TypeOf(typeValue), funcMaps)
 }
