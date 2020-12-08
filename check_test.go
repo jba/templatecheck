@@ -287,16 +287,16 @@ func TestCheck(t *testing.T) {
 			S{},
 			`template "bar" not defined`,
 		},
-		// {
-		// 	"recursion",
-		// 	`
-		// 		{{define "foos"}}{{if .}}{{template "foo" .P}}{{end}}{{end}}
-		// 		{{define "foo"}}{{.I}}{{template "foos" .P}}{{end}}
-		// 		{{template "foos" .}}
-		// 	`,
-		// 	checkStruct{},
-		// 	"",
-		// },
+		{
+			"recursion",
+			`
+				{{template "links" .}}
+				{{define "links"}}{{if .}}{{template "link" .}}{{end}}{{end}}
+				{{define "link"}}{{.I}} {{template "links" .P}}{{end}}
+			`,
+			S{I: 1, P: &S{I: 2}},
+			"",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			tmpl, err := ttmpl.New(test.name).
