@@ -1,7 +1,9 @@
+// Copyright 2020 Jonathan Amsterdam.
+// Use of this source code is governed by an MIT
+// license that can be found in the LICENSE file.
+
 /* TODO
    - Increase coverage.
-   - Examples
-   - More overview doc: functions, sub-templates.
 */
 
 // Package templatecheck checks Go templates for problems. It can detect many
@@ -20,32 +22,70 @@
 //
 //   import "html/template"
 //
-//   var tmpl = template.Must(template.New("").ParseFiles("index.tmpl"))
-//
-//   func main() {
-//       ...
-//   }
+//   var tmpl = template.Must(template.ParseFiles("index.tmpl"))
 //
 //   type homePage struct { ... }
 //
 //   func handler(w http.ResponseWriter, r *http.Request) {
+//       ...
 //       var buf bytes.Buffer
-//       if err := tmpl.Execute(&buf, homePage{...}); err != nil {
-//           http.Error(w, ...)
-//           return
-//       }
-//       _, err := w.Write(buf.Bytes())
+//       err := tmpl.Execute(&buf, homePage{...})
 //       ...
 //   }
 //
-// Use templatecheck to catch errors at startup, instead of during serving:
+// Use templatecheck to catch errors in tests, instead of during serving:
 //
-//   func init() {
+//   func TestTemplates(t *testing.T) {
 //       if err := templatecheck.CheckHTML(tmpl, homePage{}); err != nil {
-//           log.Fatal(err)
+//           t.Fatal(err)
 //       }
 //   }
 //
+//
+// Template Functions
+//
+// Due to a limitation in the template packages, functions passed to templates
+// must also be passed to templatecheck:
+//
+//   funcs := template.FuncMap{...}
+//   t := template.Must(template.New("").Funcs(funcs).Parse(...))
+//   err := templatecheck.CheckText(t, data{}, funcs)
+//
+//
+// Checking Associated Templates
+//
+// To check associated templates, use Template.Lookup. This can be necessary
+// if full type information isn't available to the main template.
+//
+// For example, here the base template is always invoked with a basePage,
+// but the type of its Details field differs depending on the value of IsTop.
+//
+//   type basePage struct {
+//       IsTop bool
+//       Details interface{}
+//   }
+//
+//   type topDetails ...
+//   type bottomDetails ...
+//
+// The template text is
+//   {{if .IsTop}}
+//     {{template "top" .Details}}
+//   {{else}}
+//     {{template "bottom" .Details}}
+//   {{end}}
+//
+//   {{define "top"}}...{{end}}
+//   {{define "bottom"}}...{{end}}
+//
+// Checking only the main template will not provide much information about the
+// two associated templates, because their data types are unknown. All three
+// templates should be checked, like so:
+//
+//   t := template.Must(template.New("").Parse(base))
+//   if err := templatecheck.CheckText(t, basePage{}) ...
+//   if err := templatecheck.CheckText(t.Lookup("top"), topDetails{}) ...
+//   if err := templatecheck.CheckText(t.Lookup("bottom"), bottomDetails{}) ...
 package templatecheck
 
 import (
@@ -65,28 +105,10 @@ type template interface {
 	Lookup(string) template
 }
 
-// CheckText checks a text/template for problems. The second argument is the
+// CheckHTML checks an html/template for problems. The second argument is the
 // type of dot passed to template.Execute. The remaining arguments are the
 // FuncMaps passed to Template.Funcs (due to a limitation in the template
 // package, templatecheck cannot retrieve these from the template.)
-func CheckText(t *ttmpl.Template, typeValue interface{}, funcMaps ...map[string]interface{}) error {
-	return check(textTemplate{t}, reflect.TypeOf(typeValue), funcMaps)
-}
-
-type textTemplate struct {
-	tmpl *ttmpl.Template
-}
-
-func (t textTemplate) Name() string      { return t.tmpl.Name() }
-func (t textTemplate) Tree() *parse.Tree { return t.tmpl.Tree }
-func (t textTemplate) Lookup(name string) template {
-	if u := t.tmpl.Lookup(name); u != nil {
-		return textTemplate{u}
-	}
-	return nil
-}
-
-// CheckHTML checks an html/template for problems. See CheckText for details.
 func CheckHTML(t *htmpl.Template, typeValue interface{}, funcMaps ...map[string]interface{}) error {
 	return check(htmlTemplate{t}, reflect.TypeOf(typeValue), funcMaps)
 }
@@ -104,7 +126,25 @@ func (t htmlTemplate) Lookup(name string) template {
 	return nil
 }
 
-// CheckSafe checks a github.com/google/safehtml/template for problems. See CheckText for details.
+// CheckText checks a text/template for problems. See CheckHTML for details.
+func CheckText(t *ttmpl.Template, typeValue interface{}, funcMaps ...map[string]interface{}) error {
+	return check(textTemplate{t}, reflect.TypeOf(typeValue), funcMaps)
+}
+
+type textTemplate struct {
+	tmpl *ttmpl.Template
+}
+
+func (t textTemplate) Name() string      { return t.tmpl.Name() }
+func (t textTemplate) Tree() *parse.Tree { return t.tmpl.Tree }
+func (t textTemplate) Lookup(name string) template {
+	if u := t.tmpl.Lookup(name); u != nil {
+		return textTemplate{u}
+	}
+	return nil
+}
+
+// CheckSafe checks a github.com/google/safehtml/template for problems. See CheckHTML for details.
 func CheckSafe(t *stmpl.Template, typeValue interface{}, funcMaps ...map[string]interface{}) error {
 	return check(safeTemplate{t}, reflect.TypeOf(typeValue), funcMaps)
 }
