@@ -8,7 +8,7 @@ import (
 	"flag"
 	"fmt"
 	"io"
-	"reflect"
+	"io/ioutil"
 	"strings"
 	"testing"
 	ttmpl "text/template"
@@ -17,104 +17,109 @@ import (
 
 var debug = flag.Bool("debug", false, "display extra debug output")
 
-type checkStruct struct {
+type S struct {
 	B     bool
 	Bs    []byte
 	I     int
-	P     *checkStruct
+	P     *S
 	R     io.Reader
+	F     interface{}
 	unexp int
 }
 
-func (c checkStruct) Add(x int) int { return c.I + x }
+func (s S) Add(x int) int { return s.I + x }
 
 func TestCheck(t *testing.T) {
 	const (
-		noX   = "can't use field X"
-		noI   = "can't use field I in type"
-		undef = "undefined variable"
+		noX          = "can't use field X"
+		noI          = "can't use field I in type"
+		undef        = "undefined variable"
+		conservative = "CONSERVATIVE"
 	)
 
-	var (
-		csType    = reflect.TypeOf(checkStruct{})
-		csMapType = reflect.MapOf(stringType, csType)
-	)
+	newChan := func() chan S {
+		c := make(chan S, 1)
+		c <- S{}
+		close(c)
+		return c
+	}
+
 	funcs := ttmpl.FuncMap{
 		"pluralize": func(i int, s string) string { return "" },
 		"variadic":  func(x int, ys ...string) string { return "" },
-		"nilary":    func() *checkStruct { return nil },
+		"nilary":    func() *S { return &S{P: &S{}} },
 	}
 
 	for _, test := range []struct {
 		name     string
 		contents string
-		dotType  reflect.Type
+		dot      interface{}
 		want     string // if non-empty, error should contain it
 	}{
-		{"field", `{{.B}}`, csType, ""},
-		{"field ptr", `{{.B}}`, reflect.PtrTo(csType), ""},
-		{"field iface", `{{.B}}`, emptyInterfaceType, ""},
-		{"no field", `{{.X}}`, csType, noX},
-		{"no field ptr", `{{.X}}`, reflect.PtrTo(csType), noX},
-		{"unexported", `{{.unexp}}`, csType, "unexported field"},
-		{"method ok", `{{.Add 1}}`, csType, ""},
-		{"method too few", `{{.Add}}`, csType, "want 1, got 0"},
-		{"method too many", `{{.Add 1 2}}`, csType, "want 1, got 2"},
-		{"method interface ok", `{{.R.Read .Bs}}`, csType, ""},
-		{"method interface too few", `{{.R.Read}}`, csType, "want 1, got 0"},
-		{"method interface too many", `{{.R.Read 1 true ""}}`, csType, "want 1, got 3"},
-		{"not a struct", `{{.B.I}}`, csType, noI},
-		{"not a func", `{{.I 1}}`, csType, "cannot be invoked"},
-		{"nested", `{{.P.P.P.X}}`, csType, noX},
-		{"map key ok", `{{.X.I}}`, csMapType, ""},
-		{"map key no field", `{{.X.X}}`, csMapType, noX},
-		{"map key arg", `{{.X 1}}`, csMapType, "is not a method but has arguments"},
-		{"map key bad type", `{{.X}}`, reflect.MapOf(boolType, stringType), "bad"},
-		{"decl ok", `{{$x := .}}{{$x.B}}`, csType, ""},
-		{"decl", `{{$x := .}}{{$x.X}}`, csType, noX},
-		{"decl bool", `{{$x := true}}{{$x.I}}`, csType, noI},
-		{"decl int", `{{$x := 1}}{{$x.I}}`, csType, noI},
-		{"not a func var", `{{$x := 1}}{{$x 1}}`, csType, "can't give argument to non-function"},
-		{"not a func pipe", `{{$x := 1}}{{1 | $x}}`, csType, "can't give argument to non-function"},
-		{"with", `{{with .P}}{{.X}}{{end}}`, csType, noX},
-		{"with else", `{{with .P}}{{.B}}{{else}}{{.X}}{{end}}`, csType, noX},
-		{"with dollar", `{{with .B}}{{$.X}}{{end}}`, csType, noX},
-		{"if", `{{if .P}}{{.P.X}}{{end}}`, csType, noX},
-		{"ifelse", `{{if .P}}{{.B}}{{else}}{{.X}}{{end}}`, csType, noX},
-		{"range slice ok", `{{range .}}{{.P.B}}{{end}}`, reflect.SliceOf(csType), ""},
-		{"range slice", `{{range .}}{{.X}}{{end}}`, reflect.SliceOf(csType), noX},
-		{"range map", `{{range .}}{{.X}}{{end}}`, csMapType, noX},
-		{"range chan ok", `{{range .}}{{.I}}{{end}}`, reflect.ChanOf(reflect.BothDir, csType), ""},
-		{"range chan", `{{range .}}{{.X}}{{end}}`, reflect.ChanOf(reflect.BothDir, csType), noX},
-		{"range chan send", `{{range .}}{{end}}`, reflect.ChanOf(reflect.SendDir, csType), "over send-only channel"},
-		{"range one var", `{{range $e := .}}{{$e.X}}{{end}}`, reflect.SliceOf(csType), noX},
-		{"range two vars", `{{range $k, $e := .}}{{$e.X}}{{end}}`, reflect.MapOf(stringType, csType), noX},
-		{"range two vars 2", `{{range $k, $e := .}}{{$k.I}}{{end}}`, reflect.MapOf(boolType, stringType), noI},
+		{"field", `{{.B}}`, S{}, ""},
+		{"field ptr", `{{.B}}`, &S{}, ""},
+		{"field iface", `{{.B}}`, *new(interface{}), ""},
+		{"no field", `{{.X}}`, S{}, noX},
+		{"no field ptr", `{{.X}}`, &S{}, noX},
+		{"unexported", `{{.unexp}}`, S{}, "unexported field"},
+		{"method ok", `{{.Add 1}}`, S{}, ""},
+		{"method too few", `{{.Add}}`, S{}, "want 1, got 0"},
+		{"method too many", `{{.Add 1 2}}`, S{}, "want 1, got 2"},
+		{"method interface ok", `{{.R.Read .Bs}}`, S{R: strings.NewReader("x")}, ""},
+		{"method interface too few", `{{.R.Read}}`, S{}, "want 1, got 0"},
+		{"method interface too many", `{{.R.Read 1 true ""}}`, S{}, "want 1, got 3"},
+		{"not a struct", `{{.B.I}}`, S{}, noI},
+		{"not a func", `{{.I 1}}`, S{}, "cannot be invoked"},
+		{"nested", `{{.P.P.P.X}}`, S{}, noX},
+		{"map key ok", `{{.X.I}}`, map[string]S{}, ""},
+		{"map key no field", `{{.X.X}}`, map[string]S{}, noX},
+		{"map key arg", `{{.X 1}}`, map[string]S{}, "is not a method but has arguments"},
+		{"map key bad type", `{{.X}}`, map[bool]string{}, "bad"},
+		{"decl ok", `{{$x := .}}{{$x.B}}`, S{}, ""},
+		{"decl", `{{$x := .}}{{$x.X}}`, S{}, noX},
+		{"decl bool", `{{$x := true}}{{$x.I}}`, S{}, noI},
+		{"decl int", `{{$x := 1}}{{$x.I}}`, S{}, noI},
+		{"not a func var", `{{$x := 1}}{{$x 1}}`, S{}, "can't give argument to non-function"},
+		{"not a func pipe", `{{$x := 1}}{{1 | $x}}`, S{}, "can't give argument to non-function"},
+		{"with", `{{with .P}}{{.X}}{{end}}`, S{P: &S{}}, noX},
+		{"with else", `{{with .P}}{{.B}}{{else}}{{.X}}{{end}}`, S{}, noX},
+		{"with dollar", `{{with .B}}{{$.X}}{{end}}`, S{B: true}, noX},
+		{"if", `{{if .P}}{{.P.X}}{{end}}`, S{P: &S{}}, noX},
+		{"ifelse", `{{if .P}}{{.B}}{{else}}{{.X}}{{end}}`, S{}, noX},
+		{"range slice ok", `{{range .}}{{.B}}{{end}}`, make([]S, 1), ""},
+		{"range slice", `{{range .}}{{.X}}{{end}}`, make([]S, 1), noX},
+		{"range map", `{{range .}}{{.X}}{{end}}`, map[string]S{"X": S{}}, noX},
+		{"range chan ok", `{{range .}}{{.I}}{{end}}`, newChan(), ""},
+		{"range chan", `{{range .}}{{.X}}{{end}}`, newChan(), noX},
+		{"range chan send", `{{range .}}{{end}}`, make(chan<- S), "over send-only channel"},
+		{"range one var", `{{range $e := .}}{{$e.X}}{{end}}`, make([]S, 1), noX},
+		{"range two vars", `{{range $k, $e := .}}{{$e.X}}{{end}}`, map[string]S{"x": S{}}, noX},
+		{"range two vars 2", `{{range $k, $e := .}}{{$k.I}}{{end}}`, map[bool]string{true: "x"}, noI},
 		{"range bad type", `{{range 1}}{{end}}`, nil, "can't iterate over type"},
-		{"range unknown", `{{range .}}{{end}}`, unknownType, ""},
-		{"range iface", `{{range .}}{{end}}`, emptyInterfaceType, ""},
-		{"chain ok", `{{(.P).I}}`, csType, ""},
-		{"chain bool", `{{(true).I}}`, csType, noI},
-		{"chain no field", `{{(.P).X}}`, csType, noX},
-		{"chain no struct", `{{(.B).I}}`, csType, noI},
-		{"chain map ok", `{{(.K).I}}`, csMapType, ""},
-		{"chain map", `{{(.K).X}}`, csMapType, noX},
-		{"chain pipe", `{{((.B) | printf).I}}`, csType, noI},
+		{"range iface", `{{range .F}}{{end}}`, S{F: 1}, conservative},
+		{"chain ok", `{{(.P).I}}`, S{P: &S{}}, ""},
+		{"chain bool", `{{(true).I}}`, S{}, noI},
+		{"chain no field", `{{(.P).X}}`, S{}, noX},
+		{"chain no struct", `{{(.B).I}}`, S{}, noI},
+		{"chain map ok", `{{(.K).I}}`, map[string]S{}, ""},
+		{"chain map", `{{(.K).X}}`, map[string]S{}, noX},
+		{"chain pipe", `{{((.B) | printf).I}}`, S{}, noI},
 		{"chain ident ok", `{{nilary.P.I}}`, nil, ""},
 		{"chain ident", `{{nilary.P.X}}`, nil, noX},
 		{"assign same type", `{{$v := 1}}{{$v = 2}}{{$v.I}}`, nil, noI},
 		{"assign diffrent type", `{{$v := 1}}{{$v = ""}}{{$v.I}}`, nil, noI},
 		{"func args few", `{{and}}`, nil, "want at least 1, got 0"},
 		{"func args many", `{{le 1 2 3}}`, nil, "want 2, got 3"},
-		{"len", `{{(len .).I}}`, csMapType, noI},
-		{"len arg too many", `{{pluralize (len 1 2) .}}`, csMapType, "want 1, got 2"},
+		{"len", `{{(len .).I}}`, map[string]S{}, noI},
+		{"len arg too many", `{{pluralize (len 1 2) .}}`, map[string]S{}, "want 1, got 2"},
 		{"userfunc ok", `{{pluralize 3 "x"}}`, nil, ""},
 		{"userfunc too few", `{{pluralize 3}}`, nil, "want 2, got 1"},
 		{"userfunc wrong type", `{{pluralize (pluralize 1 "x") "y"}}`, nil, "expected int; found string"},
 		{"variadic", `{{variadic 1 2}}`, nil, "expected string; found 2"},
+		{"undefined", `{{$x = 1}}`, nil, undef}, // parser catches references, but not assignments
 		{"arg var", `{{$v := 1}}{{pluralize $v "x"}}`, nil, ""},
 		{"arg nil", `{{pluralize nil "x"}}`, nil, "cannot assign nil to int"},
-		{"undefined", `{{$x = 1}}`, nil, undef}, // parser catches references, but not assignments
+		//{"arg reflect.Value", `{{pluralize (and 1) "x"}}`, nil, ""},
 		{
 			"nested decl", // variable redeclared in an inner scope; doesn't affect outer scope
 			`
@@ -124,7 +129,7 @@ func TestCheck(t *testing.T) {
 				{{end}}
 				{{$v.I}}
 			`,
-			csType,
+			S{},
 			noI,
 		},
 		{
@@ -135,7 +140,7 @@ func TestCheck(t *testing.T) {
 				{{end}}
 				{{$v.I}}
 			`,
-			csType,
+			S{},
 			noI,
 		},
 		{
@@ -146,7 +151,7 @@ func TestCheck(t *testing.T) {
 				{{end}}
 				{{$v.I}}
 			`,
-			csType,
+			S{},
 			"",
 		},
 		{
@@ -158,7 +163,7 @@ func TestCheck(t *testing.T) {
 				{{end}}
 				{{$v.I}}
 			`,
-			csType,
+			S{},
 			noI,
 		},
 		{
@@ -170,8 +175,8 @@ func TestCheck(t *testing.T) {
 				{{end}}
 				{{$v.I}}
 			`,
-			csType,
-			"", // be conservative, do not warn
+			S{},
+			conservative, // be conservative, do not warn even though it's an error
 		},
 		{
 			"if assign same type else",
@@ -184,7 +189,7 @@ func TestCheck(t *testing.T) {
 				{{end}}
 				{{$v.I}}
 			`,
-			csType,
+			S{},
 			noI,
 		},
 		{
@@ -198,8 +203,8 @@ func TestCheck(t *testing.T) {
 				{{end}}
 				{{$v.I}}
 			`,
-			csType,
-			"",
+			S{},
+			conservative,
 		},
 		{
 			"range assign same type",
@@ -210,7 +215,7 @@ func TestCheck(t *testing.T) {
 				{{end}}
 				{{$v.I}}
 			`,
-			csMapType,
+			map[string]S{},
 			noI,
 		},
 		{
@@ -222,8 +227,8 @@ func TestCheck(t *testing.T) {
 				{{end}}
 				{{$v.I}}
 			`,
-			csMapType,
-			"", // conservative
+			map[string]S{},
+			conservative,
 		},
 		{
 			"range else same type",
@@ -236,7 +241,7 @@ func TestCheck(t *testing.T) {
 				{{end}}
 				{{$v.I}}
 			`,
-			csMapType,
+			map[string]S{},
 			noI,
 		},
 		{
@@ -250,8 +255,8 @@ func TestCheck(t *testing.T) {
 				{{end}}
 				{{$v.I}}
 			`,
-			csMapType,
-			"",
+			map[string]S{},
+			conservative,
 		},
 		{
 			"template call ok",
@@ -259,7 +264,7 @@ func TestCheck(t *testing.T) {
 				{{template "foo" .}}
 				{{define "foo"}}{{.I}}{{end}}
 			`,
-			csType,
+			S{},
 			"",
 		},
 		{
@@ -268,7 +273,7 @@ func TestCheck(t *testing.T) {
 				{{template "foo" .}}
 				{{define "foo"}}{{.X}}{{end}}
 			`,
-			csType,
+			S{},
 			noX,
 		},
 		{
@@ -277,22 +282,25 @@ func TestCheck(t *testing.T) {
 				{{template "bar" .}}
 				{{define "foo"}}{{.X}}{{end}}
 			`,
-			csType,
+			S{},
 			`template "bar" not defined`,
 		},
-		{
-			"recursion",
-			`
-				{{define "foos"}}{{if .}}{{template "foo" .P}}{{end}}{{end}}
-				{{define "foo"}}{{.I}}{{template "foos" .P}}{{end}}
-				{{template "foos" .}}
-			`,
-			csType,
-			"",
-		},
+		// {
+		// 	"recursion",
+		// 	`
+		// 		{{define "foos"}}{{if .}}{{template "foo" .P}}{{end}}{{end}}
+		// 		{{define "foo"}}{{.I}}{{template "foos" .P}}{{end}}
+		// 		{{template "foos" .}}
+		// 	`,
+		// 	checkStruct{},
+		// 	"",
+		// },
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			tmpl, err := ttmpl.New(test.name).Funcs(funcs).Parse(test.contents)
+			tmpl, err := ttmpl.New(test.name).
+				Funcs(funcs).
+				Option("missingkey=zero").
+				Parse(test.contents)
 			if err != nil {
 				t.Fatal("while parsing:", err)
 			}
@@ -300,19 +308,41 @@ func TestCheck(t *testing.T) {
 				fmt.Printf("%s =>\n", test.contents)
 				dump(tmpl.Root, 0)
 			}
-			err = check(textTemplate{tmpl}, test.dotType, []map[string]interface{}{funcs})
+			err = CheckText(tmpl, test.dot, funcs)
 			if err != nil {
-				if test.want == "" {
+				if test.want == "" || test.want == conservative {
 					t.Fatalf("got %v, wanted no error", err)
 				}
 				if !strings.Contains(err.Error(), test.want) {
 					t.Fatalf("%q not contained in %q", test.want, err)
 				}
-			} else if test.want != "" {
+			} else if test.want != "" && test.want != conservative {
 				t.Fatalf("got nil, want error containing %q", test.want)
+			}
+			// Execute the template to make sure we get the same error state.
+			terr := safeExec(tmpl, test.dot)
+			if err == nil && terr != nil && test.want != conservative {
+				t.Fatalf("Check suceeded but Execute failed with %v", terr)
+			}
+			if err != nil && terr == nil {
+				t.Fatalf("Execute succeeded but Check failed with %v", err)
+			}
+			if err == nil && terr == nil && test.want == conservative {
+				t.Fatal("Check conservatively succeeded but Execute did too, and should have failed")
 			}
 		})
 	}
+}
+
+func safeExec(tmpl *ttmpl.Template, dot interface{}) (err error) {
+	// Execute panics on a send-only channel: golang/go#43065
+	defer func() {
+		if e := recover(); e != nil {
+			err = fmt.Errorf("panic: %v", e)
+		}
+	}()
+
+	return tmpl.Execute(ioutil.Discard, dot)
 }
 
 func TestUndefinedFunction(t *testing.T) {

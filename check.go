@@ -30,6 +30,11 @@ type template interface {
 // FuncMaps passed to Template.Funcs. (Due to a limitation in the template
 // package, templatecheck cannot retrieve these from the template; see
 // https://golang.org/issue/43062.)
+//
+// CheckHTML assumes that the "missingkey" option for the template is "zero",
+// meaning that a missing key in a map returns the zero value for the map's
+// element type. This is not the default value for "missingkey", but it allows
+// more checks.
 func CheckHTML(t *htmpl.Template, typeValue interface{}, funcMaps ...map[string]interface{}) error {
 	return check(htmlTemplate{t}, reflect.TypeOf(typeValue), funcMaps)
 }
@@ -150,6 +155,10 @@ func check(t template, dot reflect.Type, funcMaps []map[string]interface{}) (err
 		}
 	}
 
+	// A nil interface value has a nil reflect.Type. Use unknownType instead.
+	if dot == nil {
+		dot = unknownType
+	}
 	s.walk(dot, tree.Root)
 	return nil
 }
@@ -460,7 +469,9 @@ func (s *state) evalField(dot reflect.Type, fieldName string, node parse.Node, a
 
 func (s *state) evalChainNode(dot reflect.Type, chain *parse.ChainNode, args []parse.Node, final reflect.Type) reflect.Type {
 	s.at(chain)
-	s.assert(len(chain.Field) > 0, "no fields in evalChainNode")
+	if len(chain.Field) == 0 {
+		s.errorf("internal error: no fields in evalChainNode")
+	}
 	// (pipe).Field1.Field2 has pipe as .Node, fields as .Field. Eval the pipeline, then the fields.
 	// The only other possibility is ident.Field1..., that is, a nilary function call.
 	var typ reflect.Type
@@ -524,7 +535,9 @@ func (s *state) evalCall(dot, typ reflect.Type, node parse.Node, name string, ar
 
 // validateType guarantees that the argument type is assignable to the formal type.
 func (s *state) validateType(argType, formalType reflect.Type) {
-	s.assert(formalType != nil && formalType != unknownType, "bad formalType")
+	if formalType == nil || formalType == unknownType {
+		s.errorf("internal error: bad formalType %v", formalType)
+	}
 	// If we don't know the formal or arg's type, assume we can assign.
 	if formalType == unknownType || argType == unknownType {
 		return
@@ -751,12 +764,6 @@ func (s *state) varType(name string) reflect.Type {
 // at marks the state to be on node n, for error reporting.
 func (s *state) at(node parse.Node) {
 	s.node = node
-}
-
-func (s *state) assert(b bool, msg string) {
-	if !b {
-		s.errorf("%s", msg)
-	}
 }
 
 // errorf records an ExecError and terminates processing.
