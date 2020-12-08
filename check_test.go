@@ -44,11 +44,11 @@ func TestCheck(t *testing.T) {
 	}
 
 	funcs := ttmpl.FuncMap{
-		"pluralize": func(i int, s string) string { return "" },
-		"add1":      func(x int) int { return x + 1 },
-		"intptr":    func(x *int) int { return 0 },
-		"variadic":  func(x int, ys ...string) string { return "" },
-		"nilary":    func() *S { return &S{P: &S{}} },
+		"add1":     func(x int) int { return x + 1 },
+		"args":     func(bool, uint, float64, complex128) int { return 0 },
+		"intptr":   func(x *int) int { return 0 },
+		"variadic": func(x int, ys ...string) string { return "" },
+		"nilary":   func() *S { return &S{P: &S{}} },
 	}
 
 	for _, test := range []struct {
@@ -59,7 +59,8 @@ func TestCheck(t *testing.T) {
 	}{
 		{"field", `{{.B}}`, S{}, ""},
 		{"field ptr", `{{.B}}`, &S{}, ""},
-		{"field iface", `{{.B}}`, *new(interface{}), ""},
+		{"field unknown", `{{.B}}`, *new(interface{}), ""},
+		{"field iface", `{{.F.B}}`, S{F: 1}, conservative},
 		{"no field", `{{.X}}`, S{}, noX},
 		{"no field ptr", `{{.X}}`, &S{}, noX},
 		{"unexported", `{{.unexp}}`, S{}, "unexported field"},
@@ -119,8 +120,6 @@ func TestCheck(t *testing.T) {
 		{"variadic", `{{variadic 1 2}}`, nil, "expected string; found 2"},
 		{"undefined", `{{$x = 1}}`, nil, "undefined variable"}, // parser catches references, but not assignments
 		{"arg var", `{{$v := 1}}{{add1 $v}}`, nil, ""},
-		{"arg nil", `{{add1 nil}}`, nil, "cannot assign nil to int"},
-		{"arg  nil ok", `{{intptr nil}}`, nil, ""},
 		{"arg iface", `{{add1 .F}}`, S{}, conservative},
 		{"arg ptr", `{{add1 .}}`, new(int), ""},
 		{"arg addr", `{{intptr .I}}`, &S{}, ""},
@@ -130,6 +129,14 @@ func TestCheck(t *testing.T) {
 		{"arg ident", `{{add1 nilary}}`, nil, "expected int; found *templatecheck.S"},
 		{"arg chain ok", `{{add1 nilary.I}}`, nil, ""},
 		{"arg chain", `{{add1 nilary.B}}`, nil, "expected int; found bool"},
+		{"arg nil", `{{add1 nil}}`, nil, "cannot assign nil to int"},
+		{"arg nil ok", `{{intptr nil}}`, nil, ""},
+		{"arg int", `{{add1 true}}`, nil, "expected int; found true"},
+		{"arg bool", `{{args 0 0 0 0}}`, nil, "expected bool; found 0"},
+		{"arg uint", `{{args true false 0 0}}`, nil, "expected uint; found false"},
+		{"arg float", `{{args true 0 false 0}}`, nil, "expected float64; found false"},
+		{"arg complex", `{{args true 0 0 false}}`, nil, "expected complex128; found false"},
+		{"arg string", `{{variadic 1 2}}`, nil, "expected string; found 2"},
 		{
 			"nested decl", // variable redeclared in an inner scope; doesn't affect outer scope
 			`

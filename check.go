@@ -651,31 +651,21 @@ func (s *state) wrongTypeErr(typ reflect.Type, n parse.Node) {
 func (s *state) checkEmptyInterface(dot reflect.Type, n parse.Node) {
 	s.at(n)
 	switch n := n.(type) {
-	case *parse.BoolNode:
-		return
-	case *parse.DotNode:
-		return
+	case *parse.DotNode, *parse.BoolNode, *parse.NumberNode, *parse.StringNode:
 	case *parse.FieldNode:
 		_ = s.evalFieldNode(dot, n, nil, nil)
-		return
 	case *parse.IdentifierNode:
 		_ = s.evalFunction(dot, n, n, nil, nil)
-		return
 	case *parse.NilNode:
-		// NilNode is handled in evalArg, the only place that calls here.
-		s.errorf("evalEmptyInterface: nil (can't happen)")
-	case *parse.NumberNode:
-		return
-	case *parse.StringNode:
-		return
+		// NilNode is handled in checkArg, the only place that calls here.
+		s.errorf("checkEmptyInterface: nil (can't happen)")
 	case *parse.VariableNode:
 		_ = s.evalVariableNode(dot, n, nil, nil)
-		return
 	case *parse.PipeNode:
 		_ = s.evalPipeline(dot, n)
-		return
+	default:
+		s.errorf("can't handle assignment of %s to empty interface argument", n)
 	}
-	s.errorf("can't handle assignment of %s to empty interface argument", n)
 }
 
 // canBeNil reports whether an untyped nil can be assigned to the type. See reflect.Zero.
