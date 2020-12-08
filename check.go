@@ -2,10 +2,6 @@
 // Use of this source code is governed by an MIT
 // license that can be found in the LICENSE file.
 
-/* TODO
-   - Increase coverage.
-*/
-
 package templatecheck
 
 import (
@@ -571,7 +567,7 @@ func (s *state) validateType(argType, formalType reflect.Type) {
 }
 
 // checkArg checks an argument to a function. typ is the type of the formal
-// parameter.
+// parameter. n is the expression for the arg.
 func (s *state) checkArg(dot, typ reflect.Type, n parse.Node) {
 	s.at(n)
 	switch arg := n.(type) {
@@ -632,7 +628,6 @@ func (s *state) checkArg(dot, typ reflect.Type, n parse.Node) {
 		return
 	case reflect.Interface:
 		if typ.NumMethod() == 0 {
-			s.checkEmptyInterface(dot, n)
 			return
 		}
 	case reflect.Struct:
@@ -646,26 +641,6 @@ func (s *state) checkArg(dot, typ reflect.Type, n parse.Node) {
 func (s *state) wrongTypeErr(typ reflect.Type, n parse.Node) {
 	s.at(n)
 	s.errorf("wrong type: expected %s; found %s", typ, n)
-}
-
-func (s *state) checkEmptyInterface(dot reflect.Type, n parse.Node) {
-	s.at(n)
-	switch n := n.(type) {
-	case *parse.DotNode, *parse.BoolNode, *parse.NumberNode, *parse.StringNode:
-	case *parse.FieldNode:
-		_ = s.evalFieldNode(dot, n, nil, nil)
-	case *parse.IdentifierNode:
-		_ = s.evalFunction(dot, n, n, nil, nil)
-	case *parse.NilNode:
-		// NilNode is handled in checkArg, the only place that calls here.
-		s.errorf("checkEmptyInterface: nil (can't happen)")
-	case *parse.VariableNode:
-		_ = s.evalVariableNode(dot, n, nil, nil)
-	case *parse.PipeNode:
-		_ = s.evalPipeline(dot, n)
-	default:
-		s.errorf("can't handle assignment of %s to empty interface argument", n)
-	}
 }
 
 // canBeNil reports whether an untyped nil can be assigned to the type. See reflect.Zero.

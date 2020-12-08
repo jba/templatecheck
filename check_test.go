@@ -7,12 +7,15 @@ package templatecheck
 import (
 	"flag"
 	"fmt"
+	htmpl "html/template"
 	"io"
 	"io/ioutil"
 	"strings"
 	"testing"
 	ttmpl "text/template"
 	"text/template/parse"
+
+	stmpl "github.com/google/safehtml/template"
 )
 
 var debug = flag.Bool("debug", false, "display extra debug output")
@@ -44,11 +47,14 @@ func TestCheck(t *testing.T) {
 	}
 
 	funcs := ttmpl.FuncMap{
-		"add1":     func(x int) int { return x + 1 },
-		"args":     func(bool, uint, float64, complex128) int { return 0 },
-		"intptr":   func(x *int) int { return 0 },
-		"variadic": func(x int, ys ...string) string { return "" },
-		"nilary":   func() *S { return &S{P: &S{}} },
+		"add1":       func(x int) int { return x + 1 },
+		"args":       func(bool, uint, float64, complex128) int { return 0 },
+		"intptr":     func(x *int) int { return 0 },
+		"variadic":   func(x int, ys ...string) string { return "" },
+		"nilary":     func() *S { return &S{P: &S{}} },
+		"emptyiface": func(interface{}) int { return 0 },
+		"iface":      func(io.Reader) int { return 0 },
+		"structure":  func(S) int { return 0 },
 	}
 
 	for _, test := range []struct {
@@ -114,17 +120,16 @@ func TestCheck(t *testing.T) {
 		{"func args many", `{{le 1 2 3}}`, nil, "want 2, got 3"},
 		{"len", `{{(len .).I}}`, map[string]S{}, noI},
 		{"len arg too many", `{{add1 (len 1 2)}}`, nil, "want 1, got 2"},
-		{"userfunc ok", `{{add1 3}}`, nil, ""},
-		{"userfunc too few", `{{add1}}`, nil, "want 1, got 0"},
-		{"userfunc wrong type", `{{$v := "y"}}{{add1 $v}}`, nil, "expected int; found string"},
-		{"variadic", `{{variadic 1 2}}`, nil, "expected string; found 2"},
+		{"func ok", `{{add1 3}}`, nil, ""},
+		{"func too few", `{{add1}}`, nil, "want 1, got 0"},
+		{"func wrong type", `{{$v := "y"}}{{add1 $v}}`, nil, "expected int; found string"},
 		{"undefined", `{{$x = 1}}`, nil, "undefined variable"}, // parser catches references, but not assignments
 		{"arg var", `{{$v := 1}}{{add1 $v}}`, nil, ""},
-		{"arg iface", `{{add1 .F}}`, S{}, conservative},
 		{"arg ptr", `{{add1 .}}`, new(int), ""},
 		{"arg addr", `{{intptr .I}}`, &S{}, ""},
 		{"arg reflect.Value ok", `{{add1 (and 1)}}`, nil, ""},
 		{"arg reflect.Value", `{{add1 (and "x")}}`, nil, conservative},
+		{"arg reflect.Value nil", `{{and nil}}`, nil, ""},
 		{"arg ident ok", `{{and nilary}}`, nil, ""},
 		{"arg ident", `{{add1 nilary}}`, nil, "expected int; found *templatecheck.S"},
 		{"arg chain ok", `{{add1 nilary.I}}`, nil, ""},
@@ -136,7 +141,13 @@ func TestCheck(t *testing.T) {
 		{"arg uint", `{{args true false 0 0}}`, nil, "expected uint; found false"},
 		{"arg float", `{{args true 0 false 0}}`, nil, "expected float64; found false"},
 		{"arg complex", `{{args true 0 0 false}}`, nil, "expected complex128; found false"},
+		{"arg complex ok", `{{args true 0 0 1i}}`, nil, ""},
 		{"arg string", `{{variadic 1 2}}`, nil, "expected string; found 2"},
+		{"arg string ok", `{{variadic 1 "x"}}`, nil, ""},
+		{"arg iface", `{{add1 .F}}`, S{}, conservative},
+		{"arg empty iface formal", `{{emptyiface 1}}`, nil, ""},    // any arg is OK
+		{"arg nonempty iface", `{{iface 1}}`, nil, "can't handle"}, // non-empty iface args never OK
+		{"arg struct", `{{structure 1}}`, nil, "can't handle"},     // struct args never OK
 		{
 			"nested decl", // variable redeclared in an inner scope; doesn't affect outer scope
 			`
@@ -386,6 +397,22 @@ func TestUndefinedFunction(t *testing.T) {
 	const want = "is not a defined function"
 	if !strings.Contains(got, want) {
 		t.Errorf("%q not contained in %q", want, got)
+	}
+}
+
+func TestHTMLTemplate(t *testing.T) {
+	tm := htmpl.Must(htmpl.New("").Parse(`{{block "foo" .}}{{.B}}{{end}}`))
+	err := CheckHTML(tm, S{})
+	if err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestSafeTemplate(t *testing.T) {
+	tm := stmpl.Must(stmpl.New("").Parse(`{{block "foo" .}}{{.B}}{{end}}`))
+	err := CheckSafe(tm, S{})
+	if err != nil {
+		t.Fatal(err)
 	}
 }
 
