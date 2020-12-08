@@ -1,12 +1,51 @@
 /* TODO
    - Increase coverage.
-   - More overview doc.
+   - Examples
+   - More overview doc: functions, sub-templates.
 */
 
 // Package templatecheck checks Go templates for problems. It can detect many
-// errors that would only manifest themselves when the template was executed. By
-// using templatecheck just after parsing, a program can find errors early in
-// its execution, and along execution paths that might only rarely be reached.
+// errors that are normally caught only during execution. By using templatecheck
+// just after parsing, a program can find errors early in its lifetime, and
+// along template execution paths that might only rarely be reached.
+//
+// To use templatecheck on a template, that template must be invoked with the
+// same Go type each time. Passing that type to templatecheck gives it
+// enough information to verify that all the field references in the template
+// are valid. templatecheck can also verify that functions are called with the
+// right number of types of arguments, that the argument to a range statement
+// can actually be ranged over, and a few other things.
+//
+// Consider a web server that parses a template for its home page:
+//
+//   import "html/template"
+//
+//   var tmpl = template.Must(template.New("").ParseFiles("index.tmpl"))
+//
+//   func main() {
+//       ...
+//   }
+//
+//   type homePage struct { ... }
+//
+//   func handler(w http.ResponseWriter, r *http.Request) {
+//       var buf bytes.Buffer
+//       if err := tmpl.Execute(&buf, homePage{...}); err != nil {
+//           http.Error(w, ...)
+//           return
+//       }
+//       _, err := w.Write(buf.Bytes())
+//       ...
+//   }
+//
+// Use templatecheck to catch errors at startup, instead of during serving:
+//
+//   func init() {
+//       if err := templatecheck.CheckHTML(tmpl, homePage{}); err != nil {
+//           log.Fatal(err)
+//       }
+//   }
+//
 package templatecheck
 
 import (
@@ -175,7 +214,7 @@ func (s *state) walk(dot reflect.Type, node parse.Node) {
 	case *parse.WithNode:
 		s.walkIfOrWith(parse.NodeWith, dot, node.Pipe, node.List, node.ElseList)
 	default:
-		s.errorf("unknown node: %s", node)
+		s.errorf("internal error: unknown node: %s", node)
 	}
 }
 
@@ -384,7 +423,6 @@ func (s *state) evalFieldChain(dot, receiver reflect.Type, node parse.Node, iden
 }
 
 func (s *state) evalFunction(dot reflect.Type, node *parse.IdentifierNode, cmd parse.Node, args []parse.Node, final reflect.Type) reflect.Type {
-	fmt.Printf("#### evalFunction %s, args: %v, final %v\n", node.Ident, args, final)
 	s.at(node)
 	name := node.Ident
 	ft := s.lookupFuncType(name)
