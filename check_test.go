@@ -112,8 +112,8 @@ func TestCheck(t *testing.T) {
 		{"userfunc too few", `{{pluralize 3}}`, nil, "want 2, got 1"},
 		{"userfunc wrong type", `{{pluralize (pluralize 1 "x") "y"}}`, nil, "expected int; found string"},
 		{"variadic", `{{variadic 1 2}}`, nil, "expected string; found 2"},
-		{"var arg", `{{$v := 1}}{{pluralize $v "x"}}`, nil, ""},
-		{"nil arg", `{{pluralize nil "x"}}`, nil, "cannot assign nil to int"},
+		{"arg var", `{{$v := 1}}{{pluralize $v "x"}}`, nil, ""},
+		{"arg nil", `{{pluralize nil "x"}}`, nil, "cannot assign nil to int"},
 		{"undefined", `{{$x = 1}}`, nil, undef}, // parser catches references, but not assignments
 		{
 			"nested decl", // variable redeclared in an inner scope; doesn't affect outer scope
@@ -312,6 +312,21 @@ func TestCheck(t *testing.T) {
 				t.Fatalf("got nil, want error containing %q", test.want)
 			}
 		})
+	}
+}
+
+func TestUndefinedFunction(t *testing.T) {
+	// If the user doesn't pass the same FuncMap to Check, then it could
+	// return an "undefined function" error. Otherwise, the parser will catch it.
+	tmpl, err := ttmpl.New("").Funcs(ttmpl.FuncMap{"f": func() int { return 0 }}).Parse(`{{f}}`)
+	if err != nil {
+		t.Fatal("while parsing:", err)
+	}
+	err = CheckText(tmpl, nil)
+	got := err.Error()
+	const want = "is not a defined function"
+	if !strings.Contains(got, want) {
+		t.Errorf("%q not contained in %q", want, got)
 	}
 }
 

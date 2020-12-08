@@ -460,9 +460,7 @@ func (s *state) evalField(dot reflect.Type, fieldName string, node parse.Node, a
 
 func (s *state) evalChainNode(dot reflect.Type, chain *parse.ChainNode, args []parse.Node, final reflect.Type) reflect.Type {
 	s.at(chain)
-	if len(chain.Field) == 0 {
-		s.errorf("internal error: no fields in evalChainNode")
-	}
+	s.assert(len(chain.Field) > 0, "no fields in evalChainNode")
 	// (pipe).Field1.Field2 has pipe as .Node, fields as .Field. Eval the pipeline, then the fields.
 	// The only other possibility is ident.Field1..., that is, a nilary function call.
 	var typ reflect.Type
@@ -526,8 +524,9 @@ func (s *state) evalCall(dot, typ reflect.Type, node parse.Node, name string, ar
 
 // validateType guarantees that the argument type is assignable to the formal type.
 func (s *state) validateType(argType, formalType reflect.Type) {
+	s.assert(formalType != nil && formalType != unknownType, "bad formalType")
 	// If we don't know the formal or arg's type, assume we can assign.
-	if formalType == nil || formalType == unknownType || argType == unknownType {
+	if formalType == unknownType || argType == unknownType {
 		return
 	}
 	if argType.AssignableTo(formalType) {
@@ -752,6 +751,12 @@ func (s *state) varType(name string) reflect.Type {
 // at marks the state to be on node n, for error reporting.
 func (s *state) at(node parse.Node) {
 	s.node = node
+}
+
+func (s *state) assert(b bool, msg string) {
+	if !b {
+		s.errorf("%s", msg)
+	}
 }
 
 // errorf records an ExecError and terminates processing.
