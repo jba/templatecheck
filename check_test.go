@@ -33,7 +33,6 @@ func TestCheck(t *testing.T) {
 	const (
 		noX          = "can't use field X"
 		noI          = "can't use field I in type"
-		undef        = "undefined variable"
 		conservative = "CONSERVATIVE"
 	)
 
@@ -47,6 +46,7 @@ func TestCheck(t *testing.T) {
 	funcs := ttmpl.FuncMap{
 		"pluralize": func(i int, s string) string { return "" },
 		"add1":      func(x int) int { return x + 1 },
+		"intptr":    func(x *int) int { return 0 },
 		"variadic":  func(x int, ys ...string) string { return "" },
 		"nilary":    func() *S { return &S{P: &S{}} },
 	}
@@ -117,11 +117,19 @@ func TestCheck(t *testing.T) {
 		{"userfunc too few", `{{add1}}`, nil, "want 1, got 0"},
 		{"userfunc wrong type", `{{$v := "y"}}{{add1 $v}}`, nil, "expected int; found string"},
 		{"variadic", `{{variadic 1 2}}`, nil, "expected string; found 2"},
-		{"undefined", `{{$x = 1}}`, nil, undef}, // parser catches references, but not assignments
+		{"undefined", `{{$x = 1}}`, nil, "undefined variable"}, // parser catches references, but not assignments
 		{"arg var", `{{$v := 1}}{{add1 $v}}`, nil, ""},
 		{"arg nil", `{{add1 nil}}`, nil, "cannot assign nil to int"},
+		{"arg  nil ok", `{{intptr nil}}`, nil, ""},
+		{"arg iface", `{{add1 .F}}`, S{}, conservative},
+		{"arg ptr", `{{add1 .}}`, new(int), ""},
+		{"arg addr", `{{intptr .I}}`, &S{}, ""},
 		{"arg reflect.Value ok", `{{add1 (and 1)}}`, nil, ""},
 		{"arg reflect.Value", `{{add1 (and "x")}}`, nil, conservative},
+		{"arg ident ok", `{{and nilary}}`, nil, ""},
+		{"arg ident", `{{add1 nilary}}`, nil, "expected int; found *templatecheck.S"},
+		{"arg chain ok", `{{add1 nilary.I}}`, nil, ""},
+		{"arg chain", `{{add1 nilary.B}}`, nil, "expected int; found bool"},
 		{
 			"nested decl", // variable redeclared in an inner scope; doesn't affect outer scope
 			`
@@ -297,6 +305,18 @@ func TestCheck(t *testing.T) {
 			S{I: 1, P: &S{I: 2}},
 			"",
 		},
+		{
+			"unknown arg type",
+			`
+				{{$v := 1}}
+				{{if .}}
+					{{$v = true}}
+				{{end}}  {{/* v's type unknown here */}}
+				{{add1 $v}}
+			`,
+			true,
+			conservative,
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			tmpl, err := ttmpl.New(test.name).
@@ -313,13 +333,13 @@ func TestCheck(t *testing.T) {
 			err = CheckText(tmpl, test.dot, funcs)
 			if err != nil {
 				if test.want == "" || test.want == conservative {
-					t.Fatalf("got %v, wanted no error", err)
+					t.Fatalf("failed with %v, wanted success", err)
 				}
 				if !strings.Contains(err.Error(), test.want) {
 					t.Fatalf("%q not contained in %q", test.want, err)
 				}
 			} else if test.want != "" && test.want != conservative {
-				t.Fatalf("got nil, want error containing %q", test.want)
+				t.Fatalf("succeeded, want error containing %q", test.want)
 			}
 			// Execute the template to make sure we get the same error state.
 			terr := safeExec(tmpl, test.dot)

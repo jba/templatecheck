@@ -538,11 +538,8 @@ func (s *state) validateType(argType, formalType reflect.Type) {
 	if formalType == nil || formalType == unknownType {
 		s.errorf("internal error: bad formalType %v", formalType)
 	}
-	// If we don't know the formal or arg's type, assume we can assign.
-	if formalType == unknownType || argType == unknownType {
-		return
-	}
-	if argType.AssignableTo(formalType) {
+	// If we don't know the argument type, assume we can assign.
+	if argType == unknownType {
 		return
 	}
 	// If the argument is of interface type, we can't tell here whether the
@@ -557,6 +554,9 @@ func (s *state) validateType(argType, formalType reflect.Type) {
 	}
 	// If either the argument or the formal is reflect.Value, be conservative.
 	if argType == reflectValueType || formalType == reflectValueType {
+		return
+	}
+	if argType.AssignableTo(formalType) {
 		return
 	}
 	// If the argument is a pointer, it will be dereferenced.
@@ -593,7 +593,7 @@ func (s *state) checkArg(dot, typ reflect.Type, n parse.Node) {
 		s.validateType(s.evalPipeline(dot, arg), typ)
 		return
 	case *parse.IdentifierNode:
-		s.validateType(s.evalFunction(dot, arg, arg, nil, unknownType), typ)
+		s.validateType(s.evalFunction(dot, arg, arg, nil, nil), typ)
 		return
 	case *parse.ChainNode:
 		s.validateType(s.evalChainNode(dot, arg, nil, nil), typ)
