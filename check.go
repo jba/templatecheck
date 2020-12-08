@@ -463,25 +463,18 @@ func (s *state) evalChainNode(dot reflect.Type, chain *parse.ChainNode, args []p
 	if len(chain.Field) == 0 {
 		s.errorf("internal error: no fields in evalChainNode")
 	}
-	if chain.Node.Type() == parse.NodeNil {
-		s.errorf("indirection through explicit nil in %s", chain)
-	}
 	// (pipe).Field1.Field2 has pipe as .Node, fields as .Field. Eval the pipeline, then the fields.
 	// The only other possibility is ident.Field1..., that is, a nilary function call.
-	pipe := s.evalChainNode1(dot, chain.Node)
-	return s.evalFieldChain(dot, pipe, chain, chain.Field, args, final)
-}
-
-func (s *state) evalChainNode1(dot reflect.Type, n parse.Node) reflect.Type {
-	switch n := n.(type) {
+	var typ reflect.Type
+	switch n := chain.Node.(type) {
 	case *parse.PipeNode:
-		return s.evalPipeline(dot, n)
+		typ = s.evalPipeline(dot, n)
 	case *parse.IdentifierNode:
-		return s.evalFunction(dot, n, n, nil, nil)
+		typ = s.evalFunction(dot, n, n, nil, nil)
 	default:
 		s.errorf("internal error: chain.Node has type %T, not PipeNode or IdentifierNode", n)
 	}
-	panic("not reached")
+	return s.evalFieldChain(dot, typ, chain, chain.Field, args, final)
 }
 
 func (s *state) evalVariableNode(dot reflect.Type, variable *parse.VariableNode, args []parse.Node, final reflect.Type) reflect.Type {
