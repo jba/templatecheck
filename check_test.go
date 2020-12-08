@@ -46,6 +46,7 @@ func TestCheck(t *testing.T) {
 
 	funcs := ttmpl.FuncMap{
 		"pluralize": func(i int, s string) string { return "" },
+		"add1":      func(x int) int { return x + 1 },
 		"variadic":  func(x int, ys ...string) string { return "" },
 		"nilary":    func() *S { return &S{P: &S{}} },
 	}
@@ -111,15 +112,16 @@ func TestCheck(t *testing.T) {
 		{"func args few", `{{and}}`, nil, "want at least 1, got 0"},
 		{"func args many", `{{le 1 2 3}}`, nil, "want 2, got 3"},
 		{"len", `{{(len .).I}}`, map[string]S{}, noI},
-		{"len arg too many", `{{pluralize (len 1 2) .}}`, map[string]S{}, "want 1, got 2"},
-		{"userfunc ok", `{{pluralize 3 "x"}}`, nil, ""},
-		{"userfunc too few", `{{pluralize 3}}`, nil, "want 2, got 1"},
-		{"userfunc wrong type", `{{pluralize (pluralize 1 "x") "y"}}`, nil, "expected int; found string"},
+		{"len arg too many", `{{add1 (len 1 2)}}`, nil, "want 1, got 2"},
+		{"userfunc ok", `{{add1 3}}`, nil, ""},
+		{"userfunc too few", `{{add1}}`, nil, "want 1, got 0"},
+		{"userfunc wrong type", `{{$v := "y"}}{{add1 $v}}`, nil, "expected int; found string"},
 		{"variadic", `{{variadic 1 2}}`, nil, "expected string; found 2"},
 		{"undefined", `{{$x = 1}}`, nil, undef}, // parser catches references, but not assignments
-		{"arg var", `{{$v := 1}}{{pluralize $v "x"}}`, nil, ""},
-		{"arg nil", `{{pluralize nil "x"}}`, nil, "cannot assign nil to int"},
-		//{"arg reflect.Value", `{{pluralize (and 1) "x"}}`, nil, ""},
+		{"arg var", `{{$v := 1}}{{add1 $v}}`, nil, ""},
+		{"arg nil", `{{add1 nil}}`, nil, "cannot assign nil to int"},
+		{"arg reflect.Value ok", `{{add1 (and 1)}}`, nil, ""},
+		{"arg reflect.Value", `{{add1 (and "x")}}`, nil, conservative},
 		{
 			"nested decl", // variable redeclared in an inner scope; doesn't affect outer scope
 			`

@@ -555,8 +555,8 @@ func (s *state) validateType(argType, formalType reflect.Type) {
 	if argType == numberType && isNumericType(formalType) {
 		return
 	}
-	// If the formal is reflect.Value, the argument will be reflected.
-	if formalType == reflectValueType {
+	// If either the argument or the formal is reflect.Value, be conservative.
+	if argType == reflectValueType || formalType == reflectValueType {
 		return
 	}
 	// If the argument is a pointer, it will be dereferenced.
