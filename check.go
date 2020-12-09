@@ -761,13 +761,13 @@ var builtinFuncTypes = map[string]reflect.Type{
 	"and":  boolFuncType,
 	"or":   boolFuncType,
 	"call": reflect.FuncOf(oneOrMoreValues, valueOrError, true),
-	// TODO: Use more knowledge about index and slice.
+	// TODO(#2): Use more knowledge about index and slice.
 	"index": reflect.FuncOf(oneOrMoreValues, valueOrError, true),
 	"slice": reflect.FuncOf(
 		[]reflect.Type{reflectValueType, reflect.SliceOf(numberType)},
 		valueOrError,
 		true),
-	// TODO: Use more knowledge about len.
+	// TODO(#2): Use more knowledge about len.
 	"len":      reflect.TypeOf(func(reflect.Value) (int, error) { return 0, nil }),
 	"not":      reflect.TypeOf(func(reflect.Value) bool { return false }),
 	"html":     reflect.TypeOf(ttmpl.HTMLEscaper),
@@ -778,7 +778,7 @@ var builtinFuncTypes = map[string]reflect.Type{
 	"urlquery": reflect.TypeOf(ttmpl.URLQueryEscaper),
 
 	// Comparisons
-	// TODO: Use more knowledge about comparison functions.
+	// TODO(#2): Use more knowledge about comparison functions.
 	"eq": reflect.FuncOf(oneOrMoreValues, boolOrError, true),
 	"ge": comparisonFuncType,
 	"gt": comparisonFuncType,
