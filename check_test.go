@@ -348,7 +348,7 @@ func TestCheck(t *testing.T) {
 				fmt.Printf("%s =>\n", test.contents)
 				dump(tmpl.Root, 0)
 			}
-			err = CheckText(tmpl, test.dot, funcs)
+			err = CheckText(tmpl, test.dot)
 			if err != nil {
 				if test.want == "" || test.want == conservative {
 					t.Fatalf("failed with %v, wanted success", err)
@@ -385,32 +385,18 @@ func safeExec(tmpl *ttmpl.Template, dot interface{}) (err error) {
 	return tmpl.Execute(ioutil.Discard, dot)
 }
 
-func TestUndefinedFunction(t *testing.T) {
-	// If the user doesn't pass the same FuncMap to Check, then it could
-	// return an "undefined function" error. Otherwise, the parser will catch it.
-	tmpl, err := ttmpl.New("").Funcs(ttmpl.FuncMap{"f": func() int { return 0 }}).Parse(`{{f}}`)
-	if err != nil {
-		t.Fatal("while parsing:", err)
-	}
-	err = CheckText(tmpl, nil)
-	got := err.Error()
-	const want = "is not a defined function"
-	if !strings.Contains(got, want) {
-		t.Errorf("%q not contained in %q", want, got)
-	}
-}
+func TestOtherTemplates(t *testing.T) {
+	f := func(string) int { return 0 }
+	const contents = `{{block "foo" .}}{{.B}}{{f "x"}}{{end}}`
 
-func TestHTMLTemplate(t *testing.T) {
-	tm := htmpl.Must(htmpl.New("").Parse(`{{block "foo" .}}{{.B}}{{end}}`))
-	err := CheckHTML(tm, S{})
+	htm := htmpl.Must(htmpl.New("").Funcs(htmpl.FuncMap{"f": f}).Parse(contents))
+	err := CheckHTML(htm, S{})
 	if err != nil {
 		t.Fatal(err)
 	}
-}
 
-func TestSafeTemplate(t *testing.T) {
-	tm := stmpl.Must(stmpl.New("").Parse(`{{block "foo" .}}{{.B}}{{end}}`))
-	err := CheckSafe(tm, S{})
+	stm := stmpl.Must(stmpl.New("").Funcs(stmpl.FuncMap{"f": f}).Parse(contents))
+	err = CheckSafe(stm, S{})
 	if err != nil {
 		t.Fatal(err)
 	}

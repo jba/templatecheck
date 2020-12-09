@@ -19,20 +19,18 @@ type template interface {
 	Name() string
 	Tree() *parse.Tree
 	Lookup(string) template
+	FuncMap() reflect.Value
 }
 
 // CheckHTML checks an html/template for problems. The second argument is the
-// type of dot passed to template.Execute. The remaining arguments are the
-// FuncMaps passed to Template.Funcs. (Due to a limitation in the template
-// package, templatecheck cannot retrieve these from the template; see
-// https://golang.org/issue/43062.)
+// type of dot passed to template.Execute.
 //
 // CheckHTML assumes that the "missingkey" option for the template is "zero",
 // meaning that a missing key in a map returns the zero value for the map's
 // element type. This is not the default value for "missingkey", but it allows
 // more checks.
-func CheckHTML(t *htmpl.Template, typeValue interface{}, funcMaps ...map[string]interface{}) error {
-	return check(htmlTemplate{t}, reflect.TypeOf(typeValue), funcMaps)
+func CheckHTML(t *htmpl.Template, typeValue interface{}) error {
+	return check(htmlTemplate{t}, typeValue)
 }
 
 type htmlTemplate struct {
@@ -41,6 +39,7 @@ type htmlTemplate struct {
 
 func (t htmlTemplate) Name() string      { return t.tmpl.Name() }
 func (t htmlTemplate) Tree() *parse.Tree { return t.tmpl.Tree }
+
 func (t htmlTemplate) Lookup(name string) template {
 	if u := t.tmpl.Lookup(name); u != nil {
 		return htmlTemplate{u}
@@ -48,9 +47,13 @@ func (t htmlTemplate) Lookup(name string) template {
 	return nil
 }
 
+func (t htmlTemplate) FuncMap() reflect.Value {
+	return textFuncMap(reflect.ValueOf(*t.tmpl).FieldByName("text"))
+}
+
 // CheckText checks a text/template for problems. See CheckHTML for details.
-func CheckText(t *ttmpl.Template, typeValue interface{}, funcMaps ...map[string]interface{}) error {
-	return check(textTemplate{t}, reflect.TypeOf(typeValue), funcMaps)
+func CheckText(t *ttmpl.Template, typeValue interface{}) error {
+	return check(textTemplate{t}, typeValue)
 }
 
 type textTemplate struct {
@@ -59,6 +62,7 @@ type textTemplate struct {
 
 func (t textTemplate) Name() string      { return t.tmpl.Name() }
 func (t textTemplate) Tree() *parse.Tree { return t.tmpl.Tree }
+
 func (t textTemplate) Lookup(name string) template {
 	if u := t.tmpl.Lookup(name); u != nil {
 		return textTemplate{u}
@@ -66,9 +70,17 @@ func (t textTemplate) Lookup(name string) template {
 	return nil
 }
 
+func (t textTemplate) FuncMap() reflect.Value {
+	return textFuncMap(reflect.ValueOf(t.tmpl))
+}
+
+func textFuncMap(textTmplPtr reflect.Value) reflect.Value {
+	return textTmplPtr.Elem().FieldByName("parseFuncs")
+}
+
 // CheckSafe checks a github.com/google/safehtml/template for problems. See CheckHTML for details.
-func CheckSafe(t *stmpl.Template, typeValue interface{}, funcMaps ...map[string]interface{}) error {
-	return check(safeTemplate{t}, reflect.TypeOf(typeValue), funcMaps)
+func CheckSafe(t *stmpl.Template, typeValue interface{}) error {
+	return check(safeTemplate{t}, typeValue)
 }
 
 type safeTemplate struct {
@@ -77,19 +89,23 @@ type safeTemplate struct {
 
 func (t safeTemplate) Name() string      { return t.tmpl.Name() }
 func (t safeTemplate) Tree() *parse.Tree { return t.tmpl.Tree }
+
 func (t safeTemplate) Lookup(name string) template {
 	if u := t.tmpl.Lookup(name); u != nil {
 		return safeTemplate{u}
 	}
 	return nil
 }
+func (t safeTemplate) FuncMap() reflect.Value {
+	return textFuncMap(reflect.ValueOf(*t.tmpl).FieldByName("text"))
+}
 
 type state struct {
-	tmpl      template
-	node      parse.Node
-	vars      []variable
-	funcTypes map[string]reflect.Type
-	seen      map[string]bool // template names seen, to avoid recursion
+	tmpl          template
+	node          parse.Node
+	vars          []variable
+	userFuncTypes map[string]reflect.Type
+	seen          map[string]bool // template names seen, to avoid recursion
 }
 
 type (
@@ -121,7 +137,7 @@ type checkError struct {
 // and other parts of the text/template implementation, and heavily modified.
 // Roughly speaking, the changes involved replacing reflect.Value with
 // reflect.Type.
-func check(t template, dot reflect.Type, funcMaps []map[string]interface{}) (err error) {
+func check(t template, dot interface{}) (err error) {
 	defer func() {
 		if e := recover(); e != nil {
 			if cerr, ok := e.(checkError); ok {
@@ -132,29 +148,29 @@ func check(t template, dot reflect.Type, funcMaps []map[string]interface{}) (err
 		}
 	}()
 
+	dotType := reflect.TypeOf(dot)
+	// A nil interface value has a nil reflect.Type. Use unknownType instead.
+	if dot == nil {
+		dotType = unknownType
+	}
+
 	s := &state{
-		tmpl: t,
-		vars: []variable{{"$", dot}},
-		seen: map[string]bool{},
+		tmpl:          t,
+		vars:          []variable{{"$", dotType}},
+		seen:          map[string]bool{},
+		userFuncTypes: map[string]reflect.Type{},
 	}
 	tree := t.Tree()
 	if tree == nil || tree.Root == nil {
 		s.errorf("%q is an incomplete or empty template", t.Name())
 	}
-	if len(funcMaps) > 0 {
-		s.funcTypes = map[string]reflect.Type{}
-		for _, m := range funcMaps {
-			for name, f := range m {
-				s.funcTypes[name] = reflect.TypeOf(f)
-			}
-		}
+
+	iter := t.FuncMap().MapRange()
+	for iter.Next() {
+		s.userFuncTypes[iter.Key().String()] = iter.Value().Elem().Type()
 	}
 
-	// A nil interface value has a nil reflect.Type. Use unknownType instead.
-	if dot == nil {
-		dot = unknownType
-	}
-	s.walk(dot, tree.Root)
+	s.walk(dotType, tree.Root)
 	return nil
 }
 
@@ -789,7 +805,7 @@ var builtinFuncTypes = map[string]reflect.Type{
 
 // lookupFuncType returns the function with the given name. It returns nil if there is no such function.
 func (s *state) lookupFuncType(name string) reflect.Type {
-	if t := s.funcTypes[name]; t != nil {
+	if t := s.userFuncTypes[name]; t != nil {
 		return t
 	}
 	return builtinFuncTypes[name]
