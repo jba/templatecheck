@@ -38,18 +38,6 @@
 //   }
 //
 //
-// Template Functions
-//
-// Due to a limitation in the template packages, functions passed to templates
-// must also be passed to templatecheck:
-//
-//   funcs := template.FuncMap{...}
-//   t := template.Must(template.New("").Funcs(funcs).Parse(...))
-//   err := templatecheck.CheckText(t, data{}, funcs)
-//
-// https://golang.org/issue/43062 is a proposal to fix this.
-//
-//
 // Checking Associated Templates
 //
 // To check associated templates, use Template.Lookup. This can be necessary
