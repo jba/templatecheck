@@ -110,7 +110,6 @@ var (
 	emptyInterfaceType = reflect.TypeOf((*interface{})(nil)).Elem()
 	reflectValueType   = reflect.TypeOf((*reflect.Value)(nil)).Elem()
 	errorType          = reflect.TypeOf((*error)(nil)).Elem()
-	boolFuncType       = reflect.TypeOf(func(reflect.Value, ...reflect.Value) reflect.Value { return reflect.Value{} })
 )
 
 type checkError struct {
@@ -749,28 +748,30 @@ func doublePercent(str string) string {
 	return strings.ReplaceAll(str, "%", "%%")
 }
 
-var comparisonFuncType = reflect.FuncOf([]reflect.Type{reflectValueType, reflectValueType}, []reflect.Type{boolType, errorType}, false)
+var (
+	oneOrMoreValues = []reflect.Type{reflectValueType, reflect.SliceOf(reflectValueType)}
+	valueOrError    = []reflect.Type{reflectValueType, errorType}
+	boolOrError     = []reflect.Type{boolType, errorType}
+
+	boolFuncType       = reflect.FuncOf(oneOrMoreValues, []reflect.Type{reflectValueType}, true)
+	comparisonFuncType = reflect.FuncOf([]reflect.Type{reflectValueType, reflectValueType}, boolOrError, false)
+)
 
 var builtinFuncTypes = map[string]reflect.Type{
-	"and": boolFuncType,
-	"or":  boolFuncType,
-	"call": reflect.FuncOf(
-		[]reflect.Type{reflectValueType, reflect.SliceOf(reflectValueType)},
-		[]reflect.Type{reflectValueType, errorType},
-		true),
-	"html": reflect.TypeOf(ttmpl.HTMLEscaper),
+	"and":  boolFuncType,
+	"or":   boolFuncType,
+	"call": reflect.FuncOf(oneOrMoreValues, valueOrError, true),
 	// TODO: Use more knowledge about index and slice.
-	"index": reflect.FuncOf(
-		[]reflect.Type{reflectValueType, reflect.SliceOf(reflectValueType)},
-		[]reflect.Type{reflectValueType, errorType},
-		true),
+	"index": reflect.FuncOf(oneOrMoreValues, valueOrError, true),
 	"slice": reflect.FuncOf(
 		[]reflect.Type{reflectValueType, reflect.SliceOf(numberType)},
-		[]reflect.Type{reflectValueType, errorType},
+		valueOrError,
 		true),
-	"js":       reflect.TypeOf(ttmpl.JSEscaper),
+	// TODO: Use more knowledge about len.
 	"len":      reflect.TypeOf(func(reflect.Value) (int, error) { return 0, nil }),
 	"not":      reflect.TypeOf(func(reflect.Value) bool { return false }),
+	"html":     reflect.TypeOf(ttmpl.HTMLEscaper),
+	"js":       reflect.TypeOf(ttmpl.JSEscaper),
 	"print":    reflect.TypeOf(fmt.Sprint),
 	"printf":   reflect.TypeOf(fmt.Sprintf),
 	"println":  reflect.TypeOf(fmt.Sprintln),
@@ -778,10 +779,7 @@ var builtinFuncTypes = map[string]reflect.Type{
 
 	// Comparisons
 	// TODO: Use more knowledge about comparison functions.
-	"eq": reflect.FuncOf(
-		[]reflect.Type{reflectValueType, reflect.SliceOf(reflectValueType)},
-		[]reflect.Type{boolType, errorType},
-		true),
+	"eq": reflect.FuncOf(oneOrMoreValues, boolOrError, true),
 	"ge": comparisonFuncType,
 	"gt": comparisonFuncType,
 	"le": comparisonFuncType,
