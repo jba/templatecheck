@@ -184,6 +184,9 @@ func TestCheck(t *testing.T) {
 		},
 		{
 			"if assign same type", // variable assigned to same type in conditional
+			// Since $v has the same type (numberType: we don't distinguish kinds of numbers)
+			// on both execution paths, we know its type afterwards and can detect that
+			// a field reference will fail.
 			`
 				{{$v := 1}}
 				{{if .}}
@@ -196,6 +199,8 @@ func TestCheck(t *testing.T) {
 		},
 		{
 			"if assign different type", // variable assigned to different type in conditional
+			// Since $v is assigned different types on both execution paths, we know nothing
+			// about its type afterwards.
 			`
 				{{$v := 1}}
 				{{if .}}
@@ -208,8 +213,9 @@ func TestCheck(t *testing.T) {
 		},
 		{
 			"if assign same type else",
+			// Again, same type on both paths. The original type of $v doesn't matter.
 			`
-				{{$v := 1}}
+				{{$v := .}}
 				{{if .}}
 					{{$v = 2.5}}
 				{{else}}
@@ -261,7 +267,7 @@ func TestCheck(t *testing.T) {
 		{
 			"range else same type",
 			`
-				{{$v := 1}}
+				{{$v := .}}
 				{{range .}}
 					{{$v = 2}}
 				{{else}}
@@ -275,7 +281,7 @@ func TestCheck(t *testing.T) {
 		{
 			"range else different type",
 			`
-				{{$v := 1}}
+				{{$v := .}}
 				{{range .}}
 					{{$v = 2}}
 				{{else}}

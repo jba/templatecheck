@@ -249,9 +249,22 @@ func joinVars(origVars, ifVars, elseVars []variable) {
 			panic("name mismatch")
 		}
 	}
+	// Only two of these three slices matter for comparisions:
+	// - If elseVars is nil, there was no "else": one execution path kept the
+	//   original type, the other used ifVars.
+	// - If elseVars is non-nil, then one execution path used ifVars and one
+	//   used elseVars; the original variable type doesn't matter.
+	// However, we always write changes back to origVars, since that's the slice we'll
+	// use subsequently.
+	otherVars := elseVars
+	if otherVars == nil {
+		otherVars = origVars
+	}
 	for i := range origVars {
-		ot := origVars[i].typ
-		if ifVars[i].typ != ot || (elseVars != nil && elseVars[i].typ != ot) {
+		it := ifVars[i].typ
+		if it == otherVars[i].typ {
+			origVars[i].typ = it
+		} else {
 			origVars[i].typ = unknownType
 		}
 	}
