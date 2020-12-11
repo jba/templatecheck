@@ -594,33 +594,43 @@ func (s *state) validateType(argType, formalType reflect.Type) {
 	s.errorf("wrong type: expected %s; found %s", formalType, argType)
 }
 
+// evalNonLiteralArg evaluates n as a function argument if it is not a literal node.
+// It returns the resulting type and whether it could perform the evaluation.
+func (s *state) evalNonLiteralArg(dot reflect.Type, n parse.Node) (reflect.Type, bool) {
+	s.at(n)
+	switch n := n.(type) {
+	case *parse.DotNode:
+		return dot, true
+	case *parse.FieldNode:
+		return s.evalFieldNode(dot, n, []parse.Node{n}, nil), true
+	case *parse.VariableNode:
+		return s.evalVariableNode(dot, n, nil, nil), true
+	case *parse.PipeNode:
+		return s.evalPipeline(dot, n), true
+	case *parse.IdentifierNode:
+		return s.evalFunction(dot, n, n, nil, nil), true
+	case *parse.ChainNode:
+		return s.evalChainNode(dot, n, nil, nil), true
+	case *parse.NilNode, *parse.BoolNode, *parse.StringNode, *parse.NumberNode:
+		return nil, false
+	}
+	s.errorf("internal error: unexpected node type %T in evalNonLiteralArg", n)
+	panic("not reached")
+}
+
 // checkArg checks an argument to a function. typ is the type of the formal
 // parameter. n is the expression for the arg.
 func (s *state) checkArg(dot, typ reflect.Type, n parse.Node) {
 	s.at(n)
-	switch arg := n.(type) {
-	case *parse.DotNode:
-		s.validateType(dot, typ)
+	argType, isNonLiteral := s.evalNonLiteralArg(dot, n)
+	if isNonLiteral {
+		s.validateType(argType, typ)
 		return
-	case *parse.NilNode:
+	}
+	if _, ok := n.(*parse.NilNode); ok {
 		if !canBeNil(typ) {
 			s.errorf("cannot assign nil to %s", typ)
 		}
-		return
-	case *parse.FieldNode:
-		s.validateType(s.evalFieldNode(dot, arg, []parse.Node{n}, nil), typ)
-		return
-	case *parse.VariableNode:
-		s.validateType(s.evalVariableNode(dot, arg, nil, nil), typ)
-		return
-	case *parse.PipeNode:
-		s.validateType(s.evalPipeline(dot, arg), typ)
-		return
-	case *parse.IdentifierNode:
-		s.validateType(s.evalFunction(dot, arg, arg, nil, nil), typ)
-		return
-	case *parse.ChainNode:
-		s.validateType(s.evalChainNode(dot, arg, nil, nil), typ)
 		return
 	}
 	switch typ.Kind() {
