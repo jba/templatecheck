@@ -36,7 +36,7 @@ func TestCheck(t *testing.T) {
 	const (
 		noX          = "can't use field X"
 		noI          = "can't use field I in type"
-		conservative = "CONSERVATIVE"
+		conservative = "CONSERVATIVE" // Check succeeds but Execute fails
 	)
 
 	newChan := func() chan S {
