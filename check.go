@@ -541,6 +541,10 @@ func (s *state) evalCall(dot reflect.Type, fi *funcInfo, node parse.Node, name s
 	} else if numIn != fi.typ.NumIn() {
 		s.errorf("wrong number of args for %s: want %d, got %d", name, fi.typ.NumIn(), numIn)
 	}
+	// Call custom arg-checker if there is one.
+	if fi.checkArgs != nil {
+		return fi.checkArgs(s, dot, args)
+	}
 	// Args must be checked. Fixed args first.
 	i := 0
 	for ; i < numFixed && i < len(args); i++ {
@@ -788,8 +792,17 @@ func doublePercent(str string) string {
 }
 
 type funcInfo struct {
-	typ       reflect.Type // function signature
-	checkArgs func() error // if non-nil, call to check arg types
+	typ       reflect.Type                                          // function signature
+	checkArgs func(*state, reflect.Type, []parse.Node) reflect.Type // if non-nil, call to check arg types
+}
+
+// lookupFuncInfo returns the funcInfo for the function with the given name, or nil if
+// there is no such function.
+func (s *state) lookupFuncInfo(name string) *funcInfo {
+	if t := s.userFuncTypes[name]; t != nil {
+		return &funcInfo{typ: t}
+	}
+	return builtinFuncInfos[name]
 }
 
 var (
@@ -801,41 +814,59 @@ var (
 	comparisonFuncType = reflect.FuncOf([]reflect.Type{reflectValueType, reflectValueType}, boolOrError, false)
 )
 
-var builtinFuncInfos = map[string]*funcInfo{
-	"and":  &funcInfo{typ: boolFuncType},
-	"or":   &funcInfo{typ: boolFuncType},
-	"call": &funcInfo{typ: reflect.FuncOf(oneOrMoreValues, valueOrError, true)},
-	// TODO(#2): Use more knowledge about index and slice.
-	"index": &funcInfo{typ: reflect.FuncOf(oneOrMoreValues, valueOrError, true)},
-	"slice": &funcInfo{typ: reflect.FuncOf(
-		[]reflect.Type{reflectValueType, reflect.SliceOf(numberType)},
-		valueOrError,
-		true)},
-	// TODO(#2): Use more knowledge about len.
-	"len":      &funcInfo{typ: reflect.TypeOf(func(reflect.Value) (int, error) { return 0, nil })},
-	"not":      &funcInfo{typ: reflect.TypeOf(func(reflect.Value) bool { return false })},
-	"html":     &funcInfo{typ: reflect.TypeOf(ttmpl.HTMLEscaper)},
-	"js":       &funcInfo{typ: reflect.TypeOf(ttmpl.JSEscaper)},
-	"print":    &funcInfo{typ: reflect.TypeOf(fmt.Sprint)},
-	"printf":   &funcInfo{typ: reflect.TypeOf(fmt.Sprintf)},
-	"println":  &funcInfo{typ: reflect.TypeOf(fmt.Sprintln)},
-	"urlquery": &funcInfo{typ: reflect.TypeOf(ttmpl.URLQueryEscaper)},
+// Can't initialize directly because of a reference loop with checkLen.
+var builtinFuncInfos map[string]*funcInfo
 
-	// Comparisons
-	// TODO(#2): Use more knowledge about comparison functions.
-	"eq": &funcInfo{typ: reflect.FuncOf(oneOrMoreValues, boolOrError, true)},
-	"ge": &funcInfo{typ: comparisonFuncType},
-	"gt": &funcInfo{typ: comparisonFuncType},
-	"le": &funcInfo{typ: comparisonFuncType},
-	"lt": &funcInfo{typ: comparisonFuncType},
-	"ne": &funcInfo{typ: comparisonFuncType},
+func init() {
+	builtinFuncInfos = map[string]*funcInfo{
+		"and":  &funcInfo{typ: boolFuncType},
+		"or":   &funcInfo{typ: boolFuncType},
+		"call": &funcInfo{typ: reflect.FuncOf(oneOrMoreValues, valueOrError, true)},
+		// TODO(#2): Use more knowledge about index and slice.
+		"index": &funcInfo{typ: reflect.FuncOf(oneOrMoreValues, valueOrError, true)},
+		"slice": &funcInfo{typ: reflect.FuncOf(
+			[]reflect.Type{reflectValueType, reflect.SliceOf(numberType)},
+			valueOrError,
+			true)},
+		"len": &funcInfo{
+			typ:       reflect.TypeOf(func(reflect.Value) (int, error) { return 0, nil }),
+			checkArgs: checkLen,
+		},
+		"not":      &funcInfo{typ: reflect.TypeOf(func(reflect.Value) bool { return false })},
+		"html":     &funcInfo{typ: reflect.TypeOf(ttmpl.HTMLEscaper)},
+		"js":       &funcInfo{typ: reflect.TypeOf(ttmpl.JSEscaper)},
+		"print":    &funcInfo{typ: reflect.TypeOf(fmt.Sprint)},
+		"printf":   &funcInfo{typ: reflect.TypeOf(fmt.Sprintf)},
+		"println":  &funcInfo{typ: reflect.TypeOf(fmt.Sprintln)},
+		"urlquery": &funcInfo{typ: reflect.TypeOf(ttmpl.URLQueryEscaper)},
+
+		// Comparisons
+		// TODO(#2): Use more knowledge about comparison functions.
+		"eq": &funcInfo{typ: reflect.FuncOf(oneOrMoreValues, boolOrError, true)},
+		"ge": &funcInfo{typ: comparisonFuncType},
+		"gt": &funcInfo{typ: comparisonFuncType},
+		"le": &funcInfo{typ: comparisonFuncType},
+		"lt": &funcInfo{typ: comparisonFuncType},
+		"ne": &funcInfo{typ: comparisonFuncType},
+	}
 }
 
-// lookupFuncInfo returns the funcInfo for the function with the given name, or nil if
-// there is no such function.
-func (s *state) lookupFuncInfo(name string) *funcInfo {
-	if t := s.userFuncTypes[name]; t != nil {
-		return &funcInfo{typ: t}
+func checkLen(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
+	arg := args[0]
+	argType, isNonLiteral := s.evalNonLiteralArg(dot, arg)
+	if isNonLiteral {
+		argType = indirectType(argType)
+		switch argType.Kind() {
+		case reflect.Array, reflect.Chan, reflect.Map, reflect.Slice, reflect.String:
+			return intType
+		default:
+			s.errorf("len of type %s", argType)
+		}
 	}
-	return builtinFuncInfos[name]
+	if _, ok := arg.(*parse.StringNode); ok {
+		return intType
+	} else {
+		s.errorf("len of %s", arg)
+	}
+	panic("not reached")
 }
