@@ -598,25 +598,31 @@ func (s *state) validateType(argType, formalType reflect.Type) {
 	s.errorf("wrong type: expected %s; found %s", formalType, argType)
 }
 
-// evalNonLiteralArg evaluates n as a function argument if it is not a literal node.
-// It returns the resulting type and whether it could perform the evaluation.
-func (s *state) evalNonLiteralArg(dot reflect.Type, n parse.Node) (reflect.Type, bool) {
+// evalArg evaluates n as a function argument. It returns the resulting type and
+// whether the node was a literal (Nil, Bool, String or Number).
+func (s *state) evalArg(dot reflect.Type, n parse.Node) (reflect.Type, bool) {
 	s.at(n)
 	switch n := n.(type) {
 	case *parse.DotNode:
-		return dot, true
+		return dot, false
 	case *parse.FieldNode:
-		return s.evalFieldNode(dot, n, []parse.Node{n}, nil), true
+		return s.evalFieldNode(dot, n, []parse.Node{n}, nil), false
 	case *parse.VariableNode:
-		return s.evalVariableNode(dot, n, nil, nil), true
+		return s.evalVariableNode(dot, n, nil, nil), false
 	case *parse.PipeNode:
-		return s.evalPipeline(dot, n), true
+		return s.evalPipeline(dot, n), false
 	case *parse.IdentifierNode:
-		return s.evalFunction(dot, n, n, nil, nil), true
+		return s.evalFunction(dot, n, n, nil, nil), false
 	case *parse.ChainNode:
-		return s.evalChainNode(dot, n, nil, nil), true
-	case *parse.NilNode, *parse.BoolNode, *parse.StringNode, *parse.NumberNode:
-		return nil, false
+		return s.evalChainNode(dot, n, nil, nil), false
+	case *parse.NilNode:
+		return nil, true
+	case *parse.BoolNode:
+		return boolType, true
+	case *parse.StringNode:
+		return stringType, true
+	case *parse.NumberNode:
+		return numberType, true
 	}
 	s.errorf("internal error: unexpected node type %T in evalNonLiteralArg", n)
 	panic("not reached")
@@ -624,60 +630,62 @@ func (s *state) evalNonLiteralArg(dot reflect.Type, n parse.Node) (reflect.Type,
 
 // checkArg checks an argument to a function. typ is the type of the formal
 // parameter. n is the expression for the arg.
-func (s *state) checkArg(dot, typ reflect.Type, n parse.Node) {
+func (s *state) checkArg(dot, formalType reflect.Type, n parse.Node) {
 	s.at(n)
-	argType, isNonLiteral := s.evalNonLiteralArg(dot, n)
-	if isNonLiteral {
-		s.validateType(argType, typ)
+	argType, isLiteral := s.evalArg(dot, n)
+	if !isLiteral {
+		s.validateType(argType, formalType)
 		return
 	}
-	if _, ok := n.(*parse.NilNode); ok {
-		if !canBeNil(typ) {
-			s.errorf("cannot assign nil to %s", typ)
+	if argType == nil { // literal nil
+		if !canBeNil(formalType) {
+			s.errorf("cannot assign nil to %s", formalType)
 		}
 		return
 	}
-	switch typ.Kind() {
+	// Handle literals like Go untyped constants: a bool literal can be assigned
+	// to any type whose underlying type is bool, etc.
+	switch formalType.Kind() {
 	case reflect.Bool:
 		if _, ok := n.(*parse.BoolNode); !ok {
-			s.wrongTypeErr(typ, n)
+			s.wrongTypeErr(formalType, n)
 		}
 		return
 	case reflect.String:
 		if _, ok := n.(*parse.StringNode); !ok {
-			s.wrongTypeErr(typ, n)
+			s.wrongTypeErr(formalType, n)
 		}
 		return
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		if nn, ok := n.(*parse.NumberNode); !ok || !nn.IsInt {
-			s.wrongTypeErr(typ, n)
+			s.wrongTypeErr(formalType, n)
 		}
 		return
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		if nn, ok := n.(*parse.NumberNode); !ok || !nn.IsUint {
-			s.wrongTypeErr(typ, n)
+			s.wrongTypeErr(formalType, n)
 		}
 		return
 	case reflect.Float32, reflect.Float64:
 		if nn, ok := n.(*parse.NumberNode); !ok || !nn.IsFloat {
-			s.wrongTypeErr(typ, n)
+			s.wrongTypeErr(formalType, n)
 		}
 		return
 	case reflect.Complex64, reflect.Complex128:
 		if nn, ok := n.(*parse.NumberNode); !ok || !nn.IsComplex {
-			s.wrongTypeErr(typ, n)
+			s.wrongTypeErr(formalType, n)
 		}
 		return
-	case reflect.Interface:
-		if typ.NumMethod() == 0 {
+	case reflect.Interface: // Any argument can be assigned to an interface{}.
+		if formalType.NumMethod() == 0 {
 			return
 		}
-	case reflect.Struct:
-		if typ == reflectValueType {
+	case reflect.Struct: // The only acceptable formal struct type is reflect.Value.
+		if formalType == reflectValueType {
 			return
 		}
 	}
-	s.errorf("can't handle %s for arg of type %s", n, typ)
+	s.errorf("can't handle %s for arg of type %s", n, formalType)
 }
 
 func (s *state) wrongTypeErr(typ reflect.Type, n parse.Node) {
@@ -853,20 +861,19 @@ func init() {
 
 func checkLen(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
 	arg := args[0]
-	argType, isNonLiteral := s.evalNonLiteralArg(dot, arg)
-	if isNonLiteral {
-		argType = indirectType(argType)
-		switch argType.Kind() {
-		case reflect.Array, reflect.Chan, reflect.Map, reflect.Slice, reflect.String:
+	argType, isLiteral := s.evalArg(dot, arg)
+	if isLiteral {
+		if argType == stringType {
 			return intType
-		default:
-			s.errorf("len of type %s", argType)
 		}
-	}
-	if _, ok := arg.(*parse.StringNode); ok {
-		return intType
-	} else {
 		s.errorf("len of %s", arg)
+	}
+	argType = indirectType(argType)
+	switch argType.Kind() {
+	case reflect.Array, reflect.Chan, reflect.Map, reflect.Slice, reflect.String:
+		return intType
+	default:
+		s.errorf("len of type %s", argType)
 	}
 	panic("not reached")
 }
