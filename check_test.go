@@ -118,16 +118,13 @@ func TestCheck(t *testing.T) {
 		{"assign diffrent type", `{{$v := 1}}{{$v = ""}}{{$v.I}}`, nil, noI},
 		{"func args few", `{{and}}`, nil, "want at least 1, got 0"},
 		{"func args many", `{{le 1 2 3}}`, nil, "want 2, got 3"},
-		{"len", `{{(len .).I}}`, map[string]S{}, noI},
-		{"len arg too many", `{{add1 (len 1 2)}}`, nil, "want 1, got 2"},
-		{"len nil", `{{len nil}}`, nil, "len of nil"},
-		{"len num", `{{len 3+2i}}`, nil, "len of 3+2i"},
-		{"len ptr", `{{len .}}`, &[1]int{0}, ""},
-		{"len struct", `{{len .}}`, S{}, "len of type templatecheck.S"},
+
 		{"func ok", `{{add1 3}}`, nil, ""},
 		{"func too few", `{{add1}}`, nil, "want 1, got 0"},
 		{"func wrong type", `{{$v := "y"}}{{add1 $v}}`, nil, "expected int; found string"},
 		{"undefined", `{{$x = 1}}`, nil, "undefined variable"}, // parser catches references, but not assignments
+
+		// function arguments
 		{"arg var", `{{$v := 1}}{{add1 $v}}`, nil, ""},
 		{"arg ptr", `{{add1 .}}`, new(int), ""},
 		{"arg addr", `{{intptr .I}}`, &S{}, ""},
@@ -152,6 +149,32 @@ func TestCheck(t *testing.T) {
 		{"arg empty iface formal", `{{emptyiface 1}}`, nil, ""},    // any arg is OK
 		{"arg nonempty iface", `{{iface 1}}`, nil, "can't handle"}, // non-empty iface args never OK
 		{"arg struct", `{{structure 1}}`, nil, "can't handle"},     // struct args never OK
+
+		// len builtin
+		{"len", `{{(len .).I}}`, map[string]S{}, noI},
+		{"len arg too many", `{{add1 (len 1 2)}}`, nil, "want 1, got 2"},
+		{"len nil", `{{len nil}}`, nil, "len of nil"},
+		{"len num", `{{len 3+2i}}`, nil, "len of 3+2i"},
+		{"len ptr", `{{len .}}`, &[1]int{0}, ""},
+		{"len struct", `{{len .}}`, S{}, "len of type templatecheck.S"},
+
+		// index builtin
+		{"index no indexes", `{{index 1}}`, nil, ""},       // anything OK if no indexes...
+		{"index nil", `{{index nil}}`, nil, "untyped nil"}, // except literal nil
+		{"index bad type", `{{index . 0}}`, S{}, "can't index item of type templatecheck.S"},
+		{"index string ok", `{{index "x" 0}}`, nil, ""},
+		{"index string bool", `{{index "x" true}}`, nil, "cannot index slice/array with type bool"},
+		{"index string float", `{{index "x" 1.0}}`, nil, "cannot index slice/array with type float64"},
+		{"index slice ok", `{{index . 0}}`, []int{1}, ""},
+		{"index slice 2 ok", `{{index . 0 0}}`, [][]int{{1}}, ""},
+		{"index slice 2", `{{index . 0 "a"}}`, [][]int{{1}}, "cannot index"},
+		{"index map ok ", `{{index . "x"}}`, map[string]int{}, ""},
+		{"index map", `{{index . 1}}`, map[string]int{}, "has type int; should be string"},
+		{"index map 2", `{{index . "x" 1}}`, map[string]int{}, "can't index item of type"},
+		{"index map slice", `{{index . "x" 0}}`, map[string][]int{"x": []int{1}}, ""},
+		{"index indirect", `{{index . 0}}`, &[1]int{1}, ""},
+		{"index int conversion", `{{index . (len "")}}`, map[uint]int{1.0: 1}, ""},
+
 		{
 			"nested decl", // variable redeclared in an inner scope; doesn't affect outer scope
 			`
