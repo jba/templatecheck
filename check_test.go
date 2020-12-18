@@ -162,6 +162,7 @@ func TestCheck(t *testing.T) {
 		// index builtin
 		{"index no indexes", `{{index 1}}`, nil, ""},       // anything OK if no indexes...
 		{"index nil", `{{index nil}}`, nil, "untyped nil"}, // except literal nil
+		{"index index nil", `{{index "x" nil}}`, nil, "cannot index slice/array with nil"},
 		{"index bad type", `{{index . 0}}`, S{}, "can't index item of type templatecheck.S"},
 		{"index string ok", `{{index "x" 0}}`, nil, ""},
 		{"index string bool", `{{index "x" true}}`, nil, "cannot index slice/array with type bool"},
@@ -173,12 +174,15 @@ func TestCheck(t *testing.T) {
 		{"index map", `{{index . 1}}`, map[string]int{}, "has type int; should be string"},
 		{"index map 2", `{{index . "x" 1}}`, map[string]int{}, "can't index item of type"},
 		{"index map slice", `{{index . "x" 0}}`, map[string][]int{"x": []int{1}}, ""},
+		{"index map nil", `{{index . nil}}`, map[string]int{}, "value is nil; should be"},
+		{"index map nil ok", `{{index . nil}}`, map[*string]int{}, ""},
 		{"index indirect", `{{index . 0}}`, &[1]int{1}, ""},
 		{"index int conversion", `{{index . (len "")}}`, map[uint]int{1.0: 1}, ""},
 
 		// slice builtin
 		{"slice no indexes ok", `{{slice "x"}}`, nil, ""},
 		{"slice bad type", `{{slice 1}}`, nil, "can't slice item of type int"},
+		{"slice nil", `{{slice nil}}`, nil, "index of untyped nil"},
 		{"slice too many", `{{slice "x" 1 2 3 4}}`, nil, "too many slice indexes"},
 		{"slice ok", `{{slice "x" 1 2.0}}`, nil, "cannot index"},
 		{"slice string 3", `{{slice "x" 1 2 3}}`, nil, "cannot 3-index slice a string"},
