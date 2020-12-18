@@ -879,10 +879,10 @@ func init() {
 			checkArgs: checkIndex,
 		},
 		// TODO(#2): Use more knowledge about slice.
-		"slice": &funcInfo{typ: reflect.FuncOf(
-			[]reflect.Type{reflectValueType, reflect.SliceOf(numberType)},
-			valueOrError,
-			true)},
+		"slice": &funcInfo{
+			typ:       reflect.FuncOf([]reflect.Type{reflectValueType, reflect.SliceOf(numberType)}, valueOrError, true),
+			checkArgs: checkSlice,
+		},
 		"len": &funcInfo{
 			typ:       reflect.TypeOf(func(reflect.Value) (int, error) { return 0, nil }),
 			checkArgs: checkLen,

@@ -27,6 +27,7 @@ type S struct {
 	P     *S
 	R     io.Reader
 	F     interface{}
+	A     [4]int
 	unexp int
 }
 
@@ -175,6 +176,14 @@ func TestCheck(t *testing.T) {
 		{"index indirect", `{{index . 0}}`, &[1]int{1}, ""},
 		{"index int conversion", `{{index . (len "")}}`, map[uint]int{1.0: 1}, ""},
 
+		// slice builtin
+		{"slice no indexes ok", `{{slice "x"}}`, nil, ""},
+		{"slice bad type", `{{slice 1}}`, nil, "can't slice item of type int"},
+		{"slice too many", `{{slice "x" 1 2 3 4}}`, nil, "too many slice indexes"},
+		{"slice ok", `{{slice "x" 1 2.0}}`, nil, "cannot index"},
+		{"slice string 3", `{{slice "x" 1 2 3}}`, nil, "cannot 3-index slice a string"},
+		{"slice array", `{{slice .A 1 2 3}}`, &S{}, ""},
+		{"slice bad index", `{{slice "x" "y"}}`, nil, "cannot index slice/array with type string"},
 		{
 			"nested decl", // variable redeclared in an inner scope; doesn't affect outer scope
 			`

@@ -89,3 +89,34 @@ func intLike(typ reflect.Kind) bool {
 	}
 	return false
 }
+
+func checkSlice(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
+	item := args[0]
+	indexes := args[1:]
+	itemType, _ := s.evalArg(dot, item)
+	if itemType == nil {
+		s.errorf("index of untyped nil")
+	}
+	if len(indexes) > 3 {
+		s.errorf("too many slice indexes: %d", len(indexes))
+	}
+	var resultType reflect.Type
+	switch itemType.Kind() {
+	case reflect.String:
+		if len(indexes) == 3 {
+			s.errorf("cannot 3-index slice a string")
+		}
+		resultType = itemType
+	case reflect.Array:
+		resultType = reflect.SliceOf(itemType.Elem())
+	case reflect.Slice:
+		resultType = itemType
+	default:
+		s.errorf("can't slice item of type %s", itemType)
+	}
+	for _, index := range indexes {
+		indexType, _ := s.evalArg(dot, index)
+		checkIndexArg(s, indexType)
+	}
+	return resultType
+}
