@@ -897,11 +897,14 @@ func init() {
 
 		// Comparisons
 		// TODO(#2): Use more knowledge about comparison functions.
-		"eq": &funcInfo{typ: reflect.FuncOf(oneOrMoreValues, boolOrError, true)},
-		"ge": &funcInfo{typ: comparisonFuncType},
-		"gt": &funcInfo{typ: comparisonFuncType},
-		"le": &funcInfo{typ: comparisonFuncType},
-		"lt": &funcInfo{typ: comparisonFuncType},
-		"ne": &funcInfo{typ: comparisonFuncType},
+		"eq": &funcInfo{
+			typ:       reflect.FuncOf(oneOrMoreValues, boolOrError, true),
+			checkArgs: checkEq,
+		},
+		"ne": &funcInfo{typ: comparisonFuncType, checkArgs: checkEq},
+		"ge": &funcInfo{typ: comparisonFuncType, checkArgs: checkOrderedComparison},
+		"gt": &funcInfo{typ: comparisonFuncType, checkArgs: checkOrderedComparison},
+		"le": &funcInfo{typ: comparisonFuncType, checkArgs: checkOrderedComparison},
+		"lt": &funcInfo{typ: comparisonFuncType, checkArgs: checkOrderedComparison},
 	}
 }

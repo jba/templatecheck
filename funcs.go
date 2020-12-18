@@ -23,7 +23,7 @@ func checkLen(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
 	case reflect.Array, reflect.Chan, reflect.Map, reflect.Slice, reflect.String:
 		return intType
 	default:
-		s.errorf("len of type %s", argType)
+		s.errorf("len of type %s", typeString(argType))
 	}
 	panic("not reached")
 }
@@ -49,7 +49,7 @@ func checkIndex(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
 			checkMapArg(s, indexType, itemType.Key())
 			itemType = itemType.Elem()
 		default:
-			s.errorf("can't index item of type %s", itemType)
+			s.errorf("can't index item of type %s", typeString(itemType))
 		}
 	}
 	return itemType
@@ -67,7 +67,7 @@ func checkIndexArg(s *state, typ reflect.Type) {
 func checkMapArg(s *state, indexType, keyType reflect.Type) {
 	if indexType == nil {
 		if !canBeNil(keyType) {
-			s.errorf("value is nil; should be of type %s", keyType)
+			s.errorf("value is nil; should be of type %s", typeString(keyType))
 		}
 		return
 	}
@@ -77,7 +77,7 @@ func checkMapArg(s *state, indexType, keyType reflect.Type) {
 	if intLike(indexType.Kind()) && intLike(keyType.Kind()) && indexType.ConvertibleTo(keyType) {
 		return
 	}
-	s.errorf("index has type %s; should be %s", indexType, keyType)
+	s.errorf("index has type %s; should be %s", typeString(indexType), typeString(keyType))
 }
 
 func intLike(typ reflect.Kind) bool {
@@ -112,11 +112,62 @@ func checkSlice(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
 	case reflect.Slice:
 		resultType = itemType
 	default:
-		s.errorf("can't slice item of type %s", itemType)
+		s.errorf("can't slice item of type %s", typeString(itemType))
 	}
 	for _, index := range indexes {
 		indexType, _ := s.evalArg(dot, index)
 		checkIndexArg(s, indexType)
 	}
 	return resultType
+}
+
+func checkEq(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
+	if len(args) == 1 {
+		s.errorf("missing argument for comparison")
+	}
+	for _, arg := range args {
+		typ, _ := s.evalArg(dot, arg)
+		if definitelyNotComparable(typ) {
+			s.errorf("uncomparable type: %s", typeString(typ))
+		}
+	}
+	return boolType
+}
+
+// definitelyNotComparable returns true if values of type t can never be compared.
+// Only non-comparable struct types have that property.
+func definitelyNotComparable(t reflect.Type) bool {
+	return t != nil && t.Kind() == reflect.Struct && !t.Comparable()
+}
+
+// check le, gt, etc.
+func checkOrderedComparison(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
+	for _, arg := range args {
+		if t, _ := s.evalArg(dot, arg); !isOrderable(t) {
+			s.errorf("cannot compare values of type %s", typeString(t))
+		}
+	}
+	return boolType
+}
+
+func isOrderable(t reflect.Type) bool {
+	if t == nil {
+		return false
+	}
+	if intLike(t.Kind()) {
+		return true
+	}
+	switch t.Kind() {
+	case reflect.Float32, reflect.Float64, reflect.String:
+		return true
+	default:
+		return false
+	}
+}
+
+func typeString(t reflect.Type) string {
+	if t == nil {
+		return "untyped nil"
+	}
+	return t.String()
 }

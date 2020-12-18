@@ -184,6 +184,17 @@ func TestCheck(t *testing.T) {
 		{"slice string 3", `{{slice "x" 1 2 3}}`, nil, "cannot 3-index slice a string"},
 		{"slice array", `{{slice .A 1 2 3}}`, &S{}, ""},
 		{"slice bad index", `{{slice "x" "y"}}`, nil, "cannot index slice/array with type string"},
+
+		// eq/neq builtins
+		{"eq ok", `{{eq 1 2 }}`, nil, ""},
+		{"eq too few", `{{eq 1}}`, nil, "missing"},
+		{"eq func type", `{{eq . 1}}`, func() {}, conservative}, // we could notice that other arg cannot be nil
+		{"eq struct type", `{{eq . .}}`, S{}, "uncomparable type"},
+
+		// ordered comparisons
+		{"le ok", `{{le 1 2}}`, nil, ""},
+		{"le nil", `{{le 1 nil}}`, nil, "cannot compare values of type untyped nil"},
+		{"le bad type", `{{le "x" 2+3i}}`, nil, "cannot compare values of type complex"},
 		{
 			"nested decl", // variable redeclared in an inner scope; doesn't affect outer scope
 			`
