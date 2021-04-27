@@ -158,6 +158,7 @@ func TestCheck(t *testing.T) {
 		{"len num", `{{len 3+2i}}`, nil, "len of 3+2i"},
 		{"len ptr", `{{len .}}`, &[1]int{0}, ""},
 		{"len struct", `{{len .}}`, S{}, "len of type templatecheck.S"},
+		{"len iface", `{{len .F}}`, S{F: 1}, conservative},
 
 		// index builtin
 		{"index no indexes", `{{index 1}}`, nil, ""},       // anything OK if no indexes...

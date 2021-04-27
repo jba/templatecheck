@@ -19,8 +19,14 @@ func checkLen(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
 		s.errorf("len of %s", arg)
 	}
 	argType = indirectType(argType)
+	if argType == unknownType {
+		return intType
+	}
 	switch argType.Kind() {
 	case reflect.Array, reflect.Chan, reflect.Map, reflect.Slice, reflect.String:
+		return intType
+	case reflect.Interface:
+		// We can't assume anything about an interface type.
 		return intType
 	default:
 		s.errorf("len of type %s", typeString(argType))
