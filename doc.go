@@ -16,29 +16,28 @@
 //
 // Consider a web server that parses a template for its home page:
 //
-//   import "html/template"
+//	import "html/template"
 //
-//   var tmpl = template.Must(template.ParseFiles("index.tmpl"))
+//	var tmpl = template.Must(template.ParseFiles("index.tmpl"))
 //
-//   type homePage struct { ... }
+//	type homePage struct { ... }
 //
-//   func handler(w http.ResponseWriter, r *http.Request) {
-//       ...
-//       var buf bytes.Buffer
-//       err := tmpl.Execute(&buf, homePage{...})
-//       ...
-//   }
+//	func handler(w http.ResponseWriter, r *http.Request) {
+//	    ...
+//	    var buf bytes.Buffer
+//	    err := tmpl.Execute(&buf, homePage{...})
+//	    ...
+//	}
 //
 // Use templatecheck to catch errors in tests, instead of during serving:
 //
-//   func TestTemplates(t *testing.T) {
-//       if err := templatecheck.CheckHTML(tmpl, homePage{}); err != nil {
-//           t.Fatal(err)
-//       }
-//   }
+//	func TestTemplates(t *testing.T) {
+//	    if err := templatecheck.CheckHTML(tmpl, homePage{}); err != nil {
+//	        t.Fatal(err)
+//	    }
+//	}
 //
-//
-// Checking Associated Templates
+// # Checking Associated Templates
 //
 // To check associated templates, use Template.Lookup. This can be necessary
 // if full type information isn't available to the main template.
@@ -46,30 +45,31 @@
 // For example, here the base template is always invoked with a basePage,
 // but the type of its Details field differs depending on the value of IsTop.
 //
-//   type basePage struct {
-//       IsTop bool
-//       Details interface{}
-//   }
+//	type basePage struct {
+//	    IsTop bool
+//	    Details any
+//	}
 //
-//   type topDetails ...
-//   type bottomDetails ...
+//	type topDetails ...
+//	type bottomDetails ...
 //
 // The template text is
-//   {{if .IsTop}}
-//     {{template "top" .Details}}
-//   {{else}}
-//     {{template "bottom" .Details}}
-//   {{end}}
 //
-//   {{define "top"}}...{{end}}
-//   {{define "bottom"}}...{{end}}
+//	{{if .IsTop}}
+//	  {{template "top" .Details}}
+//	{{else}}
+//	  {{template "bottom" .Details}}
+//	{{end}}
+//
+//	{{define "top"}}...{{end}}
+//	{{define "bottom"}}...{{end}}
 //
 // Checking only the main template will not provide much information about the
 // two associated templates, because their data types are unknown. All three
 // templates should be checked, like so:
 //
-//   t := template.Must(template.New("").Parse(base))
-//   if err := templatecheck.CheckText(t, basePage{}) ...
-//   if err := templatecheck.CheckText(t.Lookup("top"), topDetails{}) ...
-//   if err := templatecheck.CheckText(t.Lookup("bottom"), bottomDetails{}) ...
+//	t := template.Must(template.New("").Parse(base))
+//	if err := templatecheck.CheckText(t, basePage{}) ...
+//	if err := templatecheck.CheckText(t.Lookup("top"), topDetails{}) ...
+//	if err := templatecheck.CheckText(t.Lookup("bottom"), bottomDetails{}) ...
 package templatecheck

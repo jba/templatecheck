@@ -20,7 +20,7 @@ func TestCheckSlice(t *testing.T) {
 	)
 
 	for _, test := range []struct {
-		item, want interface{}
+		item, want any
 	}{
 		{"x", ""},
 		{[]int{}, []int{}},

@@ -31,7 +31,7 @@ type template interface {
 // meaning that a missing key in a map returns the zero value for the map's
 // element type. This is not the default value for "missingkey", but it allows
 // more checks.
-func CheckHTML(t *htmpl.Template, typeValue interface{}) error {
+func CheckHTML(t *htmpl.Template, typeValue any) error {
 	return check(htmlTemplate{t}, typeValue)
 }
 
@@ -54,7 +54,7 @@ func (t htmlTemplate) FuncMap() reflect.Value {
 }
 
 // CheckText checks a text/template for problems. See CheckHTML for details.
-func CheckText(t *ttmpl.Template, typeValue interface{}) error {
+func CheckText(t *ttmpl.Template, typeValue any) error {
 	return check(textTemplate{t}, typeValue)
 }
 
@@ -81,7 +81,7 @@ func textFuncMap(textTmplPtr reflect.Value) reflect.Value {
 }
 
 // CheckSafe checks a github.com/google/safehtml/template for problems. See CheckHTML for details.
-func CheckSafe(t *stmpl.Template, typeValue interface{}) error {
+func CheckSafe(t *stmpl.Template, typeValue any) error {
 	return check(safeTemplate{t}, typeValue)
 }
 
@@ -128,7 +128,7 @@ var (
 	complex128Type     = reflect.TypeOf(complex128(0))
 	numberType         = reflect.TypeOf(number{})
 	unknownType        = reflect.TypeOf(unknown{})
-	emptyInterfaceType = reflect.TypeOf((*interface{})(nil)).Elem()
+	emptyInterfaceType = reflect.TypeOf((*any)(nil)).Elem()
 	reflectValueType   = reflect.TypeOf((*reflect.Value)(nil)).Elem()
 	errorType          = reflect.TypeOf((*error)(nil)).Elem()
 )
@@ -142,7 +142,7 @@ type checkError struct {
 // and other parts of the text/template implementation, and heavily modified.
 // Roughly speaking, the changes involved replacing reflect.Value with
 // reflect.Type.
-func check(t template, dot interface{}) (err error) {
+func check(t template, dot any) (err error) {
 	defer func() {
 		if e := recover(); e != nil {
 			if cerr, ok := e.(checkError); ok {
@@ -722,7 +722,7 @@ func (s *state) checkArg(dot, formalType reflect.Type, n parse.Node) {
 			s.wrongTypeErr(formalType, n)
 		}
 		return
-	case reflect.Interface: // Any argument can be assigned to an interface{}.
+	case reflect.Interface: // Any argument can be assigned to an any.
 		if formalType.NumMethod() == 0 {
 			return
 		}
@@ -828,7 +828,7 @@ func (s *state) at(node parse.Node) {
 }
 
 // errorf records an ExecError and terminates processing.
-func (s *state) errorf(format string, args ...interface{}) {
+func (s *state) errorf(format string, args ...any) {
 	name := doublePercent(s.tmpl.Name())
 	if s.node == nil {
 		format = fmt.Sprintf("template: %s: %s", name, format)

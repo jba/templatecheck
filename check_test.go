@@ -26,7 +26,7 @@ type S struct {
 	I     int
 	P     *S
 	R     io.Reader
-	F     interface{}
+	F     any
 	A     [4]int
 	unexp int
 }
@@ -53,7 +53,7 @@ func TestCheck(t *testing.T) {
 		"intptr":     func(x *int) int { return 0 },
 		"variadic":   func(x int, ys ...string) string { return "" },
 		"nilary":     func() *S { return &S{P: &S{}} },
-		"emptyiface": func(interface{}) int { return 0 },
+		"emptyiface": func(any) int { return 0 },
 		"iface":      func(io.Reader) int { return 0 },
 		"structure":  func(S) int { return 0 },
 	}
@@ -61,12 +61,12 @@ func TestCheck(t *testing.T) {
 	for _, test := range []struct {
 		name     string
 		contents string
-		dot      interface{}
+		dot      any
 		want     string // if non-empty, error should contain it
 	}{
 		{"field", `{{.B}}`, S{}, ""},
 		{"field ptr", `{{.B}}`, &S{}, ""},
-		{"field unknown", `{{.B}}`, *new(interface{}), ""},
+		{"field unknown", `{{.B}}`, *new(any), ""},
 		{"field iface", `{{.F.B}}`, S{F: 1}, conservative},
 		{"no field", `{{.X}}`, S{}, noX},
 		{"no field ptr", `{{.X}}`, &S{}, noX},
@@ -435,7 +435,7 @@ func TestCheck(t *testing.T) {
 	}
 }
 
-func safeExec(tmpl *ttmpl.Template, dot interface{}) (err error) {
+func safeExec(tmpl *ttmpl.Template, dot any) (err error) {
 	// Execute panics on a send-only channel: golang/go#43065
 	defer func() {
 		if e := recover(); e != nil {
