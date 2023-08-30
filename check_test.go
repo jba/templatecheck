@@ -125,6 +125,8 @@ func TestCheck(t *testing.T) {
 		{"func wrong type", `{{$v := "y"}}{{add1 $v}}`, nil, "expected int; found string"},
 		{"undefined", `{{$x = 1}}`, nil, "undefined variable"}, // parser catches references, but not assignments
 
+		{"break", `{{range .A}}{{break}}{{end}}`, S{}, ""},
+		{"continue", `{{range .A}}{{if false}}{{continue}}{{end}}{{end}}`, S{}, ""},
 		// function arguments
 		{"arg var", `{{$v := 1}}{{add1 $v}}`, nil, ""},
 		{"arg ptr", `{{add1 .}}`, new(int), ""},
@@ -316,6 +318,7 @@ func TestCheck(t *testing.T) {
 			map[string]S{},
 			conservative,
 		},
+
 		{
 			"range else same type",
 			`

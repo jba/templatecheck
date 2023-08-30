@@ -199,6 +199,8 @@ func (s *state) walk(dot reflect.Type, node parse.Node) {
 	case *parse.TextNode:
 	case *parse.WithNode:
 		s.walkIfOrWith(parse.NodeWith, dot, node.Pipe, node.List, node.ElseList)
+	case *parse.BreakNode:
+	case *parse.ContinueNode:
 	default:
 		s.errorf("internal error: unknown node: %s", node)
 	}
