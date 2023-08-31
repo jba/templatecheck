@@ -450,7 +450,6 @@ func TestCheckStrict(t *testing.T) {
 	const (
 		noX          = "can't use field X"
 		noI          = "can't use field I in type"
-		diffTypes    = "different types"
 		conservative = "TODO"
 		noField      = "cannot access field"
 	)
@@ -536,7 +535,7 @@ func TestCheckStrict(t *testing.T) {
 		{"func args many", `{{le 1 2 3}}`, nil, "want 2, got 3"},
 
 		{"func ok", `{{add1 3}}`, nil, ""},
-		{"func ok var", `{{$v := 3.1}}{{add1 $v}}`, nil, ""},
+		{"func not ok var", `{{$v := 3.1}}{{add1 $v}}`, nil, ""},
 		{"func too few", `{{add1}}`, nil, "want 1, got 0"},
 		{"func wrong type", `{{$v := "y"}}{{add1 $v}}`, nil, "expected int; found string"},
 		{"undefined", `{{$x = 1}}`, nil, "undefined variable"}, // parser catches references, but not assignments
@@ -729,7 +728,7 @@ func TestCheckStrict(t *testing.T) {
 				{{$v.I}}
 			`,
 			map[string]S{},
-			diffTypes,
+			"cannot assign",
 		},
 
 		{
@@ -744,7 +743,7 @@ func TestCheckStrict(t *testing.T) {
 				{{$v.I}}
 			`,
 			map[string]S{},
-			noI,
+			"cannot assign",
 		},
 		{
 			"range else different type",
@@ -758,7 +757,7 @@ func TestCheckStrict(t *testing.T) {
 				{{$v.I}}
 			`,
 			map[string]S{},
-			diffTypes,
+			"cannot assign",
 		},
 		{
 			"template call ok",

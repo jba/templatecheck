@@ -233,9 +233,11 @@ func (s *state) walkIfOrWith(ntype parse.NodeType, dot reflect.Type, pipe *parse
 	if elseList != nil {
 		elseVars = s.walkCopy(dot, elseList)
 	}
-	// Join the two or three variable stacks, but don't go past where we're
-	// going to pop anyway.
-	s.joinVars(s.vars[:mark], ifVars, elseVars)
+	if !s.strict {
+		// Join the two or three variable stacks, but don't go past where we're
+		// going to pop anyway.
+		s.joinVars(s.vars[:mark], ifVars, elseVars)
+	}
 }
 
 // walkCopy walks node with dot on a copy of the variable stack, and returns the copy.
@@ -330,7 +332,9 @@ func (s *state) walkRange(dot reflect.Type, r *parse.RangeNode) {
 	if r.ElseList != nil {
 		elseVars = s.walkCopy(dot, r.ElseList)
 	}
-	s.joinVars(s.vars[:origMark], rangeVars, elseVars)
+	if !s.strict {
+		s.joinVars(s.vars[:origMark], rangeVars, elseVars)
+	}
 }
 
 func (s *state) walkTemplate(dot reflect.Type, t *parse.TemplateNode) {
