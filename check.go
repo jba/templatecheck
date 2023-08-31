@@ -32,7 +32,7 @@ type template interface {
 // element type. This is not the default value for "missingkey", but it allows
 // more checks.
 func CheckHTML(t *htmpl.Template, typeValue any) error {
-	return check(htmlTemplate{t}, typeValue)
+	return check(htmlTemplate{t}, typeValue, false)
 }
 
 type htmlTemplate struct {
@@ -55,7 +55,11 @@ func (t htmlTemplate) FuncMap() reflect.Value {
 
 // CheckText checks a text/template for problems. See CheckHTML for details.
 func CheckText(t *ttmpl.Template, typeValue any) error {
-	return check(textTemplate{t}, typeValue)
+	return check(textTemplate{t}, typeValue, false)
+}
+
+func CheckTextStrict(t *ttmpl.Template, typeValue any) error {
+	return check(textTemplate{t}, typeValue, true)
 }
 
 type textTemplate struct {
@@ -82,7 +86,7 @@ func textFuncMap(textTmplPtr reflect.Value) reflect.Value {
 
 // CheckSafe checks a github.com/google/safehtml/template for problems. See CheckHTML for details.
 func CheckSafe(t *stmpl.Template, typeValue any) error {
-	return check(safeTemplate{t}, typeValue)
+	return check(safeTemplate{t}, typeValue, false)
 }
 
 type safeTemplate struct {
@@ -108,6 +112,8 @@ type state struct {
 	vars          []variable
 	userFuncTypes map[string]reflect.Type
 	seen          map[string]bool // template names seen, to avoid recursion
+	strict        bool            // Ensure no type errors at exec time.
+
 }
 
 type (
@@ -142,7 +148,7 @@ type checkError struct {
 // and other parts of the text/template implementation, and heavily modified.
 // Roughly speaking, the changes involved replacing reflect.Value with
 // reflect.Type.
-func check(t template, dot any) (err error) {
+func check(t template, dot any, strict bool) (err error) {
 	defer func() {
 		if e := recover(); e != nil {
 			if cerr, ok := e.(checkError); ok {
@@ -164,6 +170,7 @@ func check(t template, dot any) (err error) {
 		vars:          []variable{{"$", dotType}},
 		seen:          map[string]bool{},
 		userFuncTypes: map[string]reflect.Type{},
+		strict:        strict,
 	}
 	tree := t.Tree()
 	if tree == nil || tree.Root == nil {
@@ -228,7 +235,7 @@ func (s *state) walkIfOrWith(ntype parse.NodeType, dot reflect.Type, pipe *parse
 	}
 	// Join the two or three variable stacks, but don't go past where we're
 	// going to pop anyway.
-	joinVars(s.vars[:mark], ifVars, elseVars)
+	s.joinVars(s.vars[:mark], ifVars, elseVars)
 }
 
 // walkCopy walks node with dot on a copy of the variable stack, and returns the copy.
@@ -249,7 +256,7 @@ func (s *state) walkCopy(dot reflect.Type, node parse.Node) []variable {
 // Since variables are never removed or reordered, and the latter two slices
 // were copied from origVars, the three slices have the same variable at the
 // same index.
-func joinVars(origVars, ifVars, elseVars []variable) {
+func (s *state) joinVars(origVars, ifVars, elseVars []variable) {
 	// Check alignment.
 	for i, ov := range origVars {
 		if ov.name != ifVars[i].name || (elseVars != nil && ov.name != elseVars[i].name) {
@@ -272,7 +279,11 @@ func joinVars(origVars, ifVars, elseVars []variable) {
 		if it == otherVars[i].typ {
 			origVars[i].typ = it
 		} else {
-			origVars[i].typ = unknownType
+			if s.strict {
+				s.errorf("different types %s and %s for variable %s", it, otherVars[i].typ, ifVars[i].name)
+			} else {
+				origVars[i].typ = unknownType
+			}
 		}
 	}
 }
@@ -284,7 +295,7 @@ func (s *state) walkRange(dot reflect.Type, r *parse.RangeNode) {
 	typ := indirectType(s.evalPipeline(dot, r.Pipe))
 
 	if typ == unknownType {
-		return
+		s.errorf("range can't iterate over unknown type")
 	}
 	// mark top of stack before any variables in the body are pushed.
 	mark := s.mark()
@@ -313,18 +324,13 @@ func (s *state) walkRange(dot reflect.Type, r *parse.RangeNode) {
 			s.errorf("range can't iterate over send-only channel %v", typ)
 		}
 		rangeVars = checkBody(intType, typ.Elem())
-	case reflect.Invalid:
-		// An invalid value is likely a nil map, etc. and acts like an empty map.
-	case reflect.Interface:
-		// We can't assume anything about an interface type.
-		return
 	default:
 		s.errorf("range can't iterate over type %v", typ)
 	}
 	if r.ElseList != nil {
 		elseVars = s.walkCopy(dot, r.ElseList)
 	}
-	joinVars(s.vars[:origMark], rangeVars, elseVars)
+	s.joinVars(s.vars[:origMark], rangeVars, elseVars)
 }
 
 func (s *state) walkTemplate(dot reflect.Type, t *parse.TemplateNode) {
@@ -435,7 +441,11 @@ func (s *state) evalFunction(dot reflect.Type, node *parse.IdentifierNode, cmd p
 
 func (s *state) evalField(dot reflect.Type, fieldName string, node parse.Node, args []parse.Node, final, receiver reflect.Type) reflect.Type {
 	if receiver == unknownType {
-		return unknownType
+		if s.strict {
+			s.errorf("cannot access field %q of unknown type", fieldName)
+		} else {
+			return unknownType
+		}
 	}
 	receiver = indirectType(receiver)
 	// Unless it's an interface, need to get to a value of type *T to guarantee
@@ -489,8 +499,11 @@ func (s *state) evalField(dot reflect.Type, fieldName string, node parse.Node, a
 
 	case reflect.Interface:
 		// We can't assume anything about what's in an interface.
-		return unknownType
-
+		if s.strict {
+			s.errorf("cannot access field or map element of interface type")
+		} else {
+			return unknownType
+		}
 		// A reflect.Ptr case appears in the template interpreter, but can't
 		// happen here because indirectType never returns a Ptr.
 	}
@@ -798,7 +811,11 @@ func (s *state) pop(mark int) {
 // Used by variable assignments.
 func (s *state) setVar(name string, typ reflect.Type) {
 	for i := s.mark() - 1; i >= 0; i-- {
-		if s.vars[i].name == name {
+		v := s.vars[i]
+		if v.name == name {
+			if s.strict && typ != v.typ {
+				s.errorf("cannot assign type %s to variable %s of type %s", typ, v.name, v.typ)
+			}
 			s.vars[i].typ = typ
 			return
 		}
@@ -873,8 +890,14 @@ var builtinFuncInfos map[string]*funcInfo
 
 func init() {
 	builtinFuncInfos = map[string]*funcInfo{
-		"and":  &funcInfo{typ: boolFuncType},
-		"or":   &funcInfo{typ: boolFuncType},
+		"and": &funcInfo{
+			typ:       boolFuncType,
+			checkArgs: checkAndOr,
+		},
+		"or": &funcInfo{
+			typ:       boolFuncType,
+			checkArgs: checkAndOr,
+		},
 		"call": &funcInfo{typ: reflect.FuncOf(oneOrMoreValues, valueOrError, true)},
 		"index": &funcInfo{
 			typ:       reflect.FuncOf(oneOrMoreValues, valueOrError, true),

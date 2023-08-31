@@ -1,0 +1,16 @@
+strict mode:
+
+If all numbers are treated the same, what happens with % and << >>?
+	There are no built-in math functions or operators, but what if
+	the user defines one?
+
+Is joinVars even necessary? How can you get different types in different cflow
+paths if you can't assign a different type?
+Related: in setVar check for assignability, not equality.
+
+relaxed equality rules: see doc
+	One may not compare an int and a float
+
+TODO: template and define
+	All template calls must pass the identical type.
+	

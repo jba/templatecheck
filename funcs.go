@@ -61,6 +61,23 @@ func checkIndex(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
 	return itemType
 }
 
+// In strict mode, all must have the same type.
+func checkAndOr(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
+	if !s.strict {
+		// Any number of args, of any types.
+		return reflectValueType
+	}
+	// All args must have the same type.
+	t, _ := s.evalArg(dot, args[0])
+	for _, arg := range args[1:] {
+		t2, _ := s.evalArg(dot, arg)
+		if t != t2 {
+			s.errorf("and/or args must have same type; got %s and %s", t, t2)
+		}
+	}
+	return t
+}
+
 func checkIndexArg(s *state, typ reflect.Type) {
 	if typ == nil {
 		s.errorf("cannot index slice/array with nil")
