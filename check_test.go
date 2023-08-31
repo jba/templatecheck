@@ -545,6 +545,7 @@ func TestCheckStrict(t *testing.T) {
 		// function arguments
 		{"arg var", `{{$v := 1}}{{add1 $v}}`, nil, ""},
 		{"arg ptr", `{{add1 .}}`, new(int), ""},
+		{"arg ptr int8", `{{add1 .}}`, new(int8), "expected int; found *int8"},
 		{"arg addr", `{{intptr .I}}`, &S{}, ""},
 		{"arg reflect.Value ok", `{{add1 (and 1)}}`, nil, ""},
 		{"arg reflect.Value", `{{add1 (and "x")}}`, nil, "wrong type"},
