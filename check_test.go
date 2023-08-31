@@ -535,7 +535,7 @@ func TestCheckStrict(t *testing.T) {
 		{"func args many", `{{le 1 2 3}}`, nil, "want 2, got 3"},
 
 		{"func ok", `{{add1 3}}`, nil, ""},
-		{"func not ok var", `{{$v := 3.1}}{{add1 $v}}`, nil, ""},
+		{"func not ok var", `{{$v := 3.1}}{{add1 $v}}`, nil, "expected int; found float64"},
 		{"func too few", `{{add1}}`, nil, "want 1, got 0"},
 		{"func wrong type", `{{$v := "y"}}{{add1 $v}}`, nil, "expected int; found string"},
 		{"undefined", `{{$x = 1}}`, nil, "undefined variable"}, // parser catches references, but not assignments
@@ -652,13 +652,12 @@ func TestCheckStrict(t *testing.T) {
 		},
 		{
 			"if assign same type", // variable assigned to same type in conditional
-			// Since $v has the same type (numberType: we don't distinguish kinds of numbers)
-			// on both execution paths, we know its type afterwards and can detect that
-			// a field reference will fail.
+			// Since $v has the same type, on both execution paths, we know its type afterwards
+			// and can detect that  a field reference will fail.
 			`
 				{{$v := 1}}
 				{{if .}}
-					{{$v = 2.5}}
+					{{$v = 2}}
 				{{end}}
 				{{$v.I}}
 			`,
@@ -683,9 +682,9 @@ func TestCheckStrict(t *testing.T) {
 			`
 				{{$v := 1}}
 				{{if .}}
-					{{$v = 2.5}}
+					{{$v = 2}}
 				{{else}}
-					{{$v = 3i}}
+					{{$v = 3}}
 				{{end}}
 				{{$v.I}}
 			`,
@@ -711,7 +710,7 @@ func TestCheckStrict(t *testing.T) {
 			`
 				{{$v := 1}}
 				{{range .}}
-					{{$v = 2i}}
+					{{$v = 2}}
 				{{end}}
 				{{$v.I}}
 			`,

@@ -394,7 +394,7 @@ func (s *state) evalCommand(dot reflect.Type, cmd *parse.CommandNode, final refl
 	}
 	s.at(firstWord)
 	s.notAFunction(cmd.Args, final)
-	switch firstWord.(type) {
+	switch word := firstWord.(type) {
 	case *parse.BoolNode:
 		return boolType
 	case *parse.DotNode:
@@ -402,6 +402,9 @@ func (s *state) evalCommand(dot reflect.Type, cmd *parse.CommandNode, final refl
 	case *parse.NilNode:
 		s.errorf("nil is not a command")
 	case *parse.NumberNode:
+		if s.strict {
+			return s.idealConstantType(word)
+		}
 		return numberType
 	case *parse.StringNode:
 		return stringType
