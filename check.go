@@ -111,9 +111,9 @@ type state struct {
 	node          parse.Node
 	vars          []variable
 	userFuncTypes map[string]reflect.Type
-	seen          map[string]bool // template names seen, to avoid recursion
-	strict        bool            // Ensure no type errors at exec time.
-
+	seen          map[string]bool         // template names seen, to avoid recursion
+	tmplType      map[string]reflect.Type // dot types for associated templates (strict mode only)
+	strict        bool                    // Ensure no type errors at exec time.
 }
 
 type (
@@ -169,6 +169,7 @@ func check(t template, dot any, strict bool) (err error) {
 		tmpl:          t,
 		vars:          []variable{{"$", dotType}},
 		seen:          map[string]bool{},
+		tmplType:      map[string]reflect.Type{},
 		userFuncTypes: map[string]reflect.Type{},
 		strict:        strict,
 	}
@@ -338,17 +339,28 @@ func (s *state) walkRange(dot reflect.Type, r *parse.RangeNode) {
 }
 
 func (s *state) walkTemplate(dot reflect.Type, t *parse.TemplateNode) {
-	if s.seen[t.Name] {
+	if s.seen[t.Name] && !s.strict {
 		return
 	}
-	s.seen[t.Name] = true
 	s.at(t)
+	s.seen[t.Name] = true
 	tmpl := s.tmpl.Lookup(t.Name)
 	if tmpl == nil {
 		s.errorf("template %q not defined", t.Name)
 	}
 	// Variables declared by the pipeline persist.
 	dot = s.evalPipeline(dot, t.Pipe)
+	if s.strict {
+		// All calls to the template must have the same type.
+		if tt, ok := s.tmplType[t.Name]; ok {
+			if dot != tt {
+				s.errorf("inconsistent types for template %s: %s and %s", t.Name, typeString(tt), typeString(dot))
+			}
+		} else {
+			s.tmplType[t.Name] = dot
+		}
+	}
+
 	newState := *s
 	newState.tmpl = tmpl
 	// No dynamic scoping: template invocations inherit no variables.

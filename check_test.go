@@ -834,6 +834,16 @@ func TestCheckStrict(t *testing.T) {
 			nil,
 			"must have same type",
 		},
+		{
+			"template calls different types",
+			`
+				{{template "t" 1}}
+				{{template "t" 1.0}}
+				{{define "t"}}{{.}}{{end}}
+			`,
+			nil,
+			"inconsistent types",
+		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			tmpl, err := ttmpl.New(test.name).
