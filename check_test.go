@@ -624,6 +624,8 @@ func TestCheckStrict(t *testing.T) {
 		{"eq string and nil", `{{eq "x" nil}}`, nil, ""},
 		{"eq func type", `{{eq . 1}}`, func() {}, incompat},
 		{"eq func type nil", `{{eq . nil}}`, func() {}, ""},
+		{"eq nil nil", `{{eq nil nil}}`, nil, ""},
+		{"eq str str", `{{eq "a" "b"}}`, nil, ""},
 		{"eq nil func type", `{{eq nil .}}`, func() {}, ""},
 		{"eq func type nil 3", `{{eq . nil nil nil}}`, func() {}, ""},
 		{"eq func type nil 2 1", `{{eq . nil nil 1}}`, func() {}, incompat},
@@ -831,6 +833,25 @@ func TestCheckStrict(t *testing.T) {
 		{
 			"or args same type",
 			`{{or 1 ""}}`,
+			nil,
+			"must have same type",
+		},
+		{
+			"and in if any type",
+			`{{if (and 1 "")}}{{end}}`,
+			nil,
+			"",
+		},
+		{
+			"and or in if any type",
+			`{{if (and 1 (or "" 2))}}{{end}}`,
+			nil,
+			"",
+		},
+
+		{
+			"and in if nested",
+			`{{if (and (add1 (or 1 "a"))  "b")}}{{end}}`,
 			nil,
 			"must have same type",
 		},

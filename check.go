@@ -115,13 +115,14 @@ func (t safeTemplate) FuncMap() reflect.Value {
 }
 
 type state struct {
-	tmpl          template
-	node          parse.Node
-	vars          []variable
-	userFuncTypes map[string]reflect.Type
-	seen          map[string]bool         // template names seen, to avoid recursion
-	tmplType      map[string]reflect.Type // dot types for associated templates (strict mode only)
-	strict        bool                    // Ensure no type errors at exec time.
+	tmpl             template
+	node             parse.Node
+	vars             []variable
+	userFuncTypes    map[string]reflect.Type
+	seen             map[string]bool         // template names seen, to avoid recursion
+	tmplType         map[string]reflect.Type // dot types for associated templates (strict mode only)
+	strict           bool                    // Ensure no type errors at exec time.
+	onlyTruthMatters bool                    // see checkAndOr
 }
 
 type (
@@ -200,7 +201,7 @@ func (s *state) walk(dot reflect.Type, node parse.Node) {
 	switch node := node.(type) {
 	case *parse.ActionNode:
 		// Do not pop variables so they persist until next end.
-		_ = s.evalPipeline(dot, node.Pipe)
+		_ = s.evalPipeline(dot, node.Pipe, false)
 
 	case *parse.IfNode:
 		s.walkIfOrWith(parse.NodeIf, dot, node.Pipe, node.List, node.ElseList)
@@ -228,14 +229,14 @@ func (s *state) walkIfOrWith(ntype parse.NodeType, dot reflect.Type, pipe *parse
 	mark := s.mark()
 	defer s.pop(mark)
 
-	// Evaluate the argument to if/walk.
+	// Evaluate the argument to if/with.
 	// We still need to do this even in the case of `if`, for effects (var decls
 	// and assignments). Decls in the pipeline are popped, but assignments
 	// affect the state.
-	typ := s.evalPipeline(dot, pipe)
+	typ := s.evalPipeline(dot, pipe, ntype == parse.NodeIf)
 
 	if ntype == parse.NodeIf {
-		typ = dot //
+		typ = dot
 	}
 	ifVars := s.walkCopy(typ, list)
 	var elseVars []variable
@@ -303,7 +304,7 @@ func (s *state) walkRange(dot reflect.Type, r *parse.RangeNode) {
 	s.at(r)
 	origMark := s.mark()
 	defer s.pop(origMark)
-	typ := indirectType(s.evalPipeline(dot, r.Pipe))
+	typ := indirectType(s.evalPipeline(dot, r.Pipe, false))
 
 	if typ == unknownType {
 		if s.strict {
@@ -368,7 +369,7 @@ func (s *state) walkTemplate(dot reflect.Type, t *parse.TemplateNode) {
 		s.errorf("template %q not defined", t.Name)
 	}
 	// Variables declared by the pipeline persist.
-	dot = s.evalPipeline(dot, t.Pipe)
+	dot = s.evalPipeline(dot, t.Pipe, false)
 	if s.strict {
 		// All calls to the template must have the same type.
 		if tt, ok := s.tmplType[t.Name]; ok {
@@ -389,14 +390,16 @@ func (s *state) walkTemplate(dot reflect.Type, t *parse.TemplateNode) {
 	newState.walk(dot, tmpl.Tree().Root)
 }
 
-func (s *state) evalPipeline(dot reflect.Type, pipe *parse.PipeNode) reflect.Type {
+func (s *state) evalPipeline(dot reflect.Type, pipe *parse.PipeNode, onlyTruthMatters bool) reflect.Type {
+	// If onlyTruthMatters is true, then strict mode doesn't need to ensure that
+	// all args to `and` and `or` have the same type.
 	if pipe == nil {
 		return nil
 	}
 	s.at(pipe)
 	var typ reflect.Type
 	for _, cmd := range pipe.Cmds {
-		typ = s.evalCommand(dot, cmd, typ) // previous type is this one's final arg
+		typ = s.evalCommand(dot, cmd, typ, onlyTruthMatters) // previous type is this one's final arg
 	}
 	for _, variable := range pipe.Decl {
 		if pipe.IsAssign {
@@ -408,20 +411,20 @@ func (s *state) evalPipeline(dot reflect.Type, pipe *parse.PipeNode) reflect.Typ
 	return typ
 }
 
-func (s *state) evalCommand(dot reflect.Type, cmd *parse.CommandNode, final reflect.Type) reflect.Type {
+func (s *state) evalCommand(dot reflect.Type, cmd *parse.CommandNode, final reflect.Type, onlyTruthMatters bool) reflect.Type {
 	firstWord := cmd.Args[0]
 	switch n := firstWord.(type) {
 	case *parse.FieldNode:
 		return s.evalFieldNode(dot, n, cmd.Args, final)
 	case *parse.ChainNode:
-		return s.evalChainNode(dot, n, cmd.Args, final)
+		return s.evalChainNode(dot, n, cmd.Args, final, onlyTruthMatters)
 	case *parse.IdentifierNode:
 		// Must be a function.
-		return s.evalFunction(dot, n, cmd, cmd.Args, final)
+		return s.evalFunction(dot, n, cmd, cmd.Args, final, onlyTruthMatters)
 	case *parse.PipeNode:
 		// Parenthesized pipeline. The arguments are all inside the pipeline; final must be absent.
 		s.notAFunction(cmd.Args, final)
-		return s.evalPipeline(dot, n)
+		return s.evalPipeline(dot, n, onlyTruthMatters)
 	case *parse.VariableNode:
 		return s.evalVariableNode(dot, n, cmd.Args, final)
 	}
@@ -469,14 +472,14 @@ func (s *state) evalFieldChain(dot, receiver reflect.Type, node parse.Node, iden
 	return s.evalField(dot, ident[n-1], node, args, final, receiver)
 }
 
-func (s *state) evalFunction(dot reflect.Type, node *parse.IdentifierNode, cmd parse.Node, args []parse.Node, final reflect.Type) reflect.Type {
+func (s *state) evalFunction(dot reflect.Type, node *parse.IdentifierNode, cmd parse.Node, args []parse.Node, final reflect.Type, onlyTruthMatters bool) reflect.Type {
 	s.at(node)
 	name := node.Ident
 	fi := s.lookupFuncInfo(name)
 	if fi == nil {
 		s.errorf("%q is not a defined function", name)
 	}
-	return s.evalCall(dot, fi, cmd, name, args, final)
+	return s.evalCall(dot, fi, cmd, name, args, final, onlyTruthMatters)
 }
 
 func (s *state) evalField(dot reflect.Type, fieldName string, node parse.Node, args []parse.Node, final, receiver reflect.Type) reflect.Type {
@@ -511,7 +514,7 @@ func (s *state) evalField(dot reflect.Type, fieldName string, node parse.Node, a
 			}
 			mt = reflect.FuncOf(ins, outs, mt.IsVariadic())
 		}
-		return s.evalCall(dot, &funcInfo{typ: mt}, node, fieldName, args, final)
+		return s.evalCall(dot, &funcInfo{typ: mt}, node, fieldName, args, final, false)
 	}
 	hasArgs := len(args) > 1 || final != nil
 	// It's not a method; must be a field of a struct or an element of a map.
@@ -540,7 +543,7 @@ func (s *state) evalField(dot reflect.Type, fieldName string, node parse.Node, a
 	case reflect.Interface:
 		// We can't assume anything about what's in an interface.
 		if s.strict {
-			s.errorf("cannot access field or map element of interface type")
+			s.errorf("cannot access field or map element of interface type %s", typeString(receiver))
 		} else {
 			return unknownType
 		}
@@ -551,7 +554,7 @@ func (s *state) evalField(dot reflect.Type, fieldName string, node parse.Node, a
 	panic("not reached")
 }
 
-func (s *state) evalChainNode(dot reflect.Type, chain *parse.ChainNode, args []parse.Node, final reflect.Type) reflect.Type {
+func (s *state) evalChainNode(dot reflect.Type, chain *parse.ChainNode, args []parse.Node, final reflect.Type, onlyTruthMatters bool) reflect.Type {
 	s.at(chain)
 	if len(chain.Field) == 0 {
 		s.errorf("internal error: no fields in evalChainNode")
@@ -561,9 +564,9 @@ func (s *state) evalChainNode(dot reflect.Type, chain *parse.ChainNode, args []p
 	var typ reflect.Type
 	switch n := chain.Node.(type) {
 	case *parse.PipeNode:
-		typ = s.evalPipeline(dot, n)
+		typ = s.evalPipeline(dot, n, onlyTruthMatters)
 	case *parse.IdentifierNode:
-		typ = s.evalFunction(dot, n, n, nil, nil)
+		typ = s.evalFunction(dot, n, n, nil, nil, onlyTruthMatters)
 	default:
 		s.errorf("internal error: chain.Node has type %T, not PipeNode or IdentifierNode", n)
 	}
@@ -584,7 +587,7 @@ func (s *state) evalVariableNode(dot reflect.Type, variable *parse.VariableNode,
 // evalCall checks a function or method call. If it's a method, fun already has the receiver bound, so
 // it looks just like a function call. The arg list, if non-nil, includes (in the manner of the shell), arg[0]
 // as the function itself.
-func (s *state) evalCall(dot reflect.Type, fi *funcInfo, node parse.Node, name string, args []parse.Node, final reflect.Type) reflect.Type {
+func (s *state) evalCall(dot reflect.Type, fi *funcInfo, node parse.Node, name string, args []parse.Node, final reflect.Type, onlyTruthMatters bool) reflect.Type {
 	if args != nil {
 		args = args[1:] // Zeroth arg is function name/node; not passed to function.
 	}
@@ -603,6 +606,9 @@ func (s *state) evalCall(dot reflect.Type, fi *funcInfo, node parse.Node, name s
 	}
 	// Call custom arg-checker if there is one.
 	if fi.checkArgs != nil {
+		// See checkAndOr for onlyTruthMatters.
+		defer func(b bool) { s.onlyTruthMatters = b }(s.onlyTruthMatters)
+		s.onlyTruthMatters = onlyTruthMatters
 		return fi.checkArgs(s, dot, args)
 	}
 	// Args must be checked. Fixed args first.
@@ -662,7 +668,7 @@ func (s *state) validateType(argType, formalType reflect.Type) {
 
 // evalArg evaluates n as a function argument. It returns the resulting type and
 // whether the node was a literal (Nil, Bool, String or Number).
-func (s *state) evalArg(dot reflect.Type, n parse.Node) (reflect.Type, bool) {
+func (s *state) evalArg(dot reflect.Type, n parse.Node, onlyTruthMatters bool) (reflect.Type, bool) {
 	s.at(n)
 	switch n := n.(type) {
 	case *parse.DotNode:
@@ -672,11 +678,11 @@ func (s *state) evalArg(dot reflect.Type, n parse.Node) (reflect.Type, bool) {
 	case *parse.VariableNode:
 		return s.evalVariableNode(dot, n, nil, nil), false
 	case *parse.PipeNode:
-		return s.evalPipeline(dot, n), false
+		return s.evalPipeline(dot, n, onlyTruthMatters), false
 	case *parse.IdentifierNode:
-		return s.evalFunction(dot, n, n, nil, nil), false
+		return s.evalFunction(dot, n, n, nil, nil, onlyTruthMatters), false
 	case *parse.ChainNode:
-		return s.evalChainNode(dot, n, nil, nil), false
+		return s.evalChainNode(dot, n, nil, nil, onlyTruthMatters), false
 	case *parse.NilNode:
 		return nil, true
 	case *parse.BoolNode:
@@ -732,7 +738,7 @@ func isHexInt(s string) bool {
 // checkArg checks an argument to a function.
 func (s *state) checkArg(dot, formalType reflect.Type, arg parse.Node) {
 	s.at(arg)
-	argType, isLiteral := s.evalArg(dot, arg)
+	argType, isLiteral := s.evalArg(dot, arg, false)
 	if !isLiteral {
 		s.validateType(argType, formalType)
 		return
@@ -982,7 +988,10 @@ func init() {
 			typ:       reflect.TypeOf(func(reflect.Value) (int, error) { return 0, nil }),
 			checkArgs: checkLen,
 		},
-		"not":      &funcInfo{typ: reflect.TypeOf(func(reflect.Value) bool { return false })},
+		"not": &funcInfo{
+			typ:       reflect.TypeOf(func(reflect.Value) bool { return false }),
+			checkArgs: checkNot,
+		},
 		"html":     &funcInfo{typ: reflect.TypeOf(ttmpl.HTMLEscaper)},
 		"js":       &funcInfo{typ: reflect.TypeOf(ttmpl.JSEscaper)},
 		"print":    &funcInfo{typ: reflect.TypeOf(fmt.Sprint)},

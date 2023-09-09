@@ -1,8 +1,5 @@
 strict mode:
 
-neq: only takes two args but same rules as eq
-
-template, block and define
-	All template calls must pass the identical type.
+re-parsing: check that the override of a defined template has the same arg type
 
 

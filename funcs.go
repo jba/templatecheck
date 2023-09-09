@@ -18,7 +18,7 @@ func checkLen(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
 }
 
 func validateLen(s *state, dot reflect.Type, arg parse.Node) {
-	argType, isLiteral := s.evalArg(dot, arg)
+	argType, isLiteral := s.evalArg(dot, arg, false)
 	if isLiteral {
 		if argType != stringType {
 			s.errorf("len of %s", arg)
@@ -47,13 +47,13 @@ func validateLen(s *state, dot reflect.Type, arg parse.Node) {
 
 func checkIndex(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
 	item := args[0]
-	itemType, _ := s.evalArg(dot, item)
+	itemType, _ := s.evalArg(dot, item, false)
 	if itemType == nil {
 		s.errorf("index of untyped nil")
 	}
 	for _, index := range args[1:] {
 		itemType = indirectType(itemType)
-		indexType, _ := s.evalArg(dot, index)
+		indexType, _ := s.evalArg(dot, index, false)
 		switch itemType.Kind() {
 		case reflect.Array, reflect.Slice, reflect.String:
 			checkIndexArg(s, indexType)
@@ -79,10 +79,10 @@ func checkAndOr(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
 		return reflectValueType
 	}
 	// All args must have the same type.
-	t, _ := s.evalArg(dot, args[0])
+	t, _ := s.evalArg(dot, args[0], s.onlyTruthMatters)
 	for _, arg := range args[1:] {
-		t2, _ := s.evalArg(dot, arg)
-		if t != t2 {
+		t2, _ := s.evalArg(dot, arg, s.onlyTruthMatters)
+		if !s.onlyTruthMatters && t != t2 {
 			s.errorf("and/or args must have same type; got %s and %s", t, t2)
 		}
 	}
@@ -117,7 +117,7 @@ func checkMapArg(s *state, indexType, keyType reflect.Type) {
 func checkSlice(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
 	item := args[0]
 	indexes := args[1:]
-	itemType, _ := s.evalArg(dot, item)
+	itemType, _ := s.evalArg(dot, item, false)
 	if itemType == nil {
 		s.errorf("index of untyped nil")
 	}
@@ -139,28 +139,30 @@ func checkSlice(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
 		s.errorf("can't slice item of type %s", typeString(itemType))
 	}
 	for _, index := range indexes {
-		indexType, _ := s.evalArg(dot, index)
+		indexType, _ := s.evalArg(dot, index, false)
 		checkIndexArg(s, indexType)
 	}
 	return resultType
 }
 
 // TODO: revisit this, matching the actual definition if eq in template/funcs.go.
+// - Call the equivalent of indirectInterface.
+// - Use basicKind.
 func checkEq(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
 	if len(args) == 1 {
 		s.errorf("missing argument for comparison")
 	}
 	for _, arg := range args {
-		typ, _ := s.evalArg(dot, arg)
+		typ, _ := s.evalArg(dot, arg, false)
 		if definitelyNotComparable(typ) {
 			s.errorf("uncomparable type: %s", typeString(typ))
 		}
 	}
 	if s.strict {
-		typ0, isLit0 := s.evalArg(dot, args[0])
+		typ0, _ := s.evalArg(dot, args[0], false)
 		for _, arg := range args[1:] {
-			typ, isLit := s.evalArg(dot, arg)
-			if !comparisonCompatible(typ0, isLit0, typ, isLit) {
+			typ, _ := s.evalArg(dot, arg, false)
+			if !comparisonCompatible(typ0, typ) {
 				s.errorf("incompatible types for comparison: %s and %s", typeString(typ0), typeString(typ))
 			}
 		}
@@ -174,19 +176,14 @@ func definitelyNotComparable(t reflect.Type) bool {
 	return t != nil && t.Kind() == reflect.Struct && !t.Comparable()
 }
 
-func comparisonCompatible(t1 reflect.Type, isLit1 bool, t2 reflect.Type, isLit2 bool) bool {
-	if t1 == nil {
-		if t2 == nil {
-			return true
-		}
-		t1, t2 = t2, t1
-		isLit1, isLit2 = isLit2, isLit1
-	}
-	if t2 == nil {
-		// Comparison with untyped nil; always OK (?)
+func comparisonCompatible(t1, t2 reflect.Type) bool {
+	// Comparison with untyped nil; always OK (?)
+	if t1 == nil || t2 == nil {
 		return true
 	}
-
+	if t1.Kind() == t2.Kind() && t1.Comparable() {
+		return true
+	}
 	if isIntegerType(t1) && isIntegerType(t2) {
 		return true
 	}
@@ -212,7 +209,7 @@ func isNilComparable(t reflect.Type) bool {
 // check le, gt, etc.
 func checkOrderedComparison(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
 	for _, arg := range args {
-		if t, _ := s.evalArg(dot, arg); !isOrderable(t) {
+		if t, _ := s.evalArg(dot, arg, false); !isOrderable(t) {
 			s.errorf("cannot compare values of type %s", typeString(t))
 		}
 	}
@@ -224,6 +221,11 @@ func isOrderable(t reflect.Type) bool {
 		return false
 	}
 	return t.Kind() == reflect.String || isIntegerType(t) || isFloatType(t)
+}
+
+func checkNot(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
+	// Any type is OK.
+	return boolType
 }
 
 func typeString(t reflect.Type) string {
