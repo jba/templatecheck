@@ -9,6 +9,7 @@ package templatecheck
 import (
 	"fmt"
 	htmpl "html/template"
+	"io"
 	"reflect"
 	"strings"
 	ttmpl "text/template"
@@ -22,6 +23,7 @@ type template interface {
 	Tree() *parse.Tree
 	Lookup(string) template
 	FuncMap() reflect.Value
+	Execute(io.Writer, any) error
 }
 
 // CheckHTML checks an html/template for problems. The second argument is the
@@ -57,6 +59,10 @@ func (t htmlTemplate) FuncMap() reflect.Value {
 	return textFuncMap(reflect.ValueOf(*t.tmpl).FieldByName("text"))
 }
 
+func (t htmlTemplate) Execute(w io.Writer, data any) error {
+	return t.tmpl.Execute(w, data)
+}
+
 // CheckText checks a text/template for problems. See CheckHTML for details.
 func CheckText(t *ttmpl.Template, typeValue any) error {
 	return check(textTemplate{t}, typeValue, false)
@@ -82,6 +88,18 @@ func (t textTemplate) Lookup(name string) template {
 
 func (t textTemplate) FuncMap() reflect.Value {
 	return textFuncMap(reflect.ValueOf(t.tmpl))
+}
+
+// func (t textTemplate) Clone() (template, error) {
+// 	c, err := t.tmpl.Clone()
+// 	if err != nil {
+// 		return safeTemplate{}, err
+// 	}
+// 	return safeTemplate{c}, nil
+// }
+
+func (t textTemplate) Execute(w io.Writer, data any) error {
+	return t.tmpl.Execute(w, data)
 }
 
 func textFuncMap(textTmplPtr reflect.Value) reflect.Value {
@@ -112,6 +130,18 @@ func (t safeTemplate) Lookup(name string) template {
 }
 func (t safeTemplate) FuncMap() reflect.Value {
 	return textFuncMap(reflect.ValueOf(*t.tmpl).FieldByName("text"))
+}
+
+func (t safeTemplate) Clone() (template, error) {
+	c, err := t.tmpl.Clone()
+	if err != nil {
+		return safeTemplate{}, err
+	}
+	return safeTemplate{c}, nil
+}
+
+func (t safeTemplate) Execute(w io.Writer, data any) error {
+	return t.tmpl.Execute(w, data)
 }
 
 type state struct {
