@@ -593,23 +593,25 @@ func (s *state) validateType(argType, formalType reflect.Type) {
 	if formalType == nil || formalType == unknownType {
 		s.errorf("internal error: bad formalType %v", formalType)
 	}
-	// If we don't know the argument type, assume we can assign.
-	if argType == unknownType {
-		return
-	}
-	// If the argument is of interface type, we can't tell here whether the
-	// assignment will succeed. Be conservative.
-	if argType.Kind() == reflect.Interface {
-		return
-	}
-	// If the argument is numberType, be conservative and assume it can be
-	// converted to any numeric formal type.
-	if argType == numberType && isNumericType(formalType) {
-		return
-	}
-	// If either the argument or the formal is reflect.Value, be conservative.
-	if argType == reflectValueType || formalType == reflectValueType {
-		return
+	if !s.strict {
+		// If we don't know the argument type, assume we can assign.
+		if argType == unknownType {
+			return
+		}
+		// If the argument is of interface type, we can't tell here whether the
+		// assignment will succeed. Be conservative.
+		if argType.Kind() == reflect.Interface {
+			return
+		}
+		// If the argument is numberType, be conservative and assume it can be
+		// converted to any numeric formal type.
+		if argType == numberType && isNumericType(formalType) {
+			return
+		}
+		// If either the argument or the formal is reflect.Value, be conservative.
+		if argType == reflectValueType || formalType == reflectValueType {
+			return
+		}
 	}
 	if argType.AssignableTo(formalType) {
 		return
@@ -694,11 +696,10 @@ func isHexInt(s string) bool {
 	return len(s) > 2 && s[0] == '0' && (s[1] == 'x' || s[1] == 'X') && !strings.ContainsAny(s, "pP")
 }
 
-// checkArg checks an argument to a function. typ is the type of the formal
-// parameter. n is the expression for the arg.
-func (s *state) checkArg(dot, formalType reflect.Type, n parse.Node) {
-	s.at(n)
-	argType, isLiteral := s.evalArg(dot, n)
+// checkArg checks an argument to a function.
+func (s *state) checkArg(dot, formalType reflect.Type, arg parse.Node) {
+	s.at(arg)
+	argType, isLiteral := s.evalArg(dot, arg)
 	if !isLiteral {
 		s.validateType(argType, formalType)
 		return
@@ -713,33 +714,33 @@ func (s *state) checkArg(dot, formalType reflect.Type, n parse.Node) {
 	// to any type whose underlying type is bool, etc.
 	switch formalType.Kind() {
 	case reflect.Bool:
-		if _, ok := n.(*parse.BoolNode); !ok {
-			s.wrongTypeErr(formalType, n)
+		if _, ok := arg.(*parse.BoolNode); !ok {
+			s.wrongTypeErr(formalType, arg)
 		}
 		return
 	case reflect.String:
-		if _, ok := n.(*parse.StringNode); !ok {
-			s.wrongTypeErr(formalType, n)
+		if _, ok := arg.(*parse.StringNode); !ok {
+			s.wrongTypeErr(formalType, arg)
 		}
 		return
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		if nn, ok := n.(*parse.NumberNode); !ok || !nn.IsInt {
-			s.wrongTypeErr(formalType, n)
+		if nn, ok := arg.(*parse.NumberNode); !ok || !nn.IsInt {
+			s.wrongTypeErr(formalType, arg)
 		}
 		return
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		if nn, ok := n.(*parse.NumberNode); !ok || !nn.IsUint {
-			s.wrongTypeErr(formalType, n)
+		if nn, ok := arg.(*parse.NumberNode); !ok || !nn.IsUint {
+			s.wrongTypeErr(formalType, arg)
 		}
 		return
 	case reflect.Float32, reflect.Float64:
-		if nn, ok := n.(*parse.NumberNode); !ok || !nn.IsFloat {
-			s.wrongTypeErr(formalType, n)
+		if nn, ok := arg.(*parse.NumberNode); !ok || !nn.IsFloat {
+			s.wrongTypeErr(formalType, arg)
 		}
 		return
 	case reflect.Complex64, reflect.Complex128:
-		if nn, ok := n.(*parse.NumberNode); !ok || !nn.IsComplex {
-			s.wrongTypeErr(formalType, n)
+		if nn, ok := arg.(*parse.NumberNode); !ok || !nn.IsComplex {
+			s.wrongTypeErr(formalType, arg)
 		}
 		return
 	case reflect.Interface: // Any argument can be assigned to an any.
@@ -751,7 +752,7 @@ func (s *state) checkArg(dot, formalType reflect.Type, n parse.Node) {
 			return
 		}
 	}
-	s.errorf("can't handle %s for arg of type %s", n, formalType)
+	s.errorf("can't handle %s for arg of type %s", arg, formalType)
 }
 
 func (s *state) wrongTypeErr(typ reflect.Type, n parse.Node) {
@@ -771,12 +772,41 @@ func canBeNil(typ reflect.Type) bool {
 }
 
 func isNumericType(t reflect.Type) bool {
+	return isIntegerType(t) || isFloatType(t) || isComplexType(t)
+}
+
+func isIntegerType(t reflect.Type) bool {
+	if t == nil {
+		return false
+	}
 	switch t.Kind() {
 	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
 		return true
 	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
 		return true
-	case reflect.Float32, reflect.Float64, reflect.Complex64, reflect.Complex128:
+	default:
+		return false
+	}
+}
+
+func isFloatType(t reflect.Type) bool {
+	if t == nil {
+		return false
+	}
+	switch t.Kind() {
+	case reflect.Float32, reflect.Float64:
+		return true
+	default:
+		return false
+	}
+}
+
+func isComplexType(t reflect.Type) bool {
+	if t == nil {
+		return false
+	}
+	switch t.Kind() {
+	case reflect.Complex64, reflect.Complex128:
 		return true
 	default:
 		return false

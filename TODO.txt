@@ -1,7 +1,6 @@
 strict mode:
 
-relaxed equality rules: see doc
-	One may not compare an int and a float
+neq: only takes two args but same rules as eq
 
 template, block and define
 	All template calls must pass the identical type.

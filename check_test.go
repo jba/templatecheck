@@ -27,7 +27,7 @@ type S struct {
 	I     int
 	P     *S
 	R     io.Reader
-	F     any
+	Any   any
 	A     [4]int
 	unexp int
 }
@@ -68,7 +68,7 @@ func (s S) Add(x int) int { return s.I + x }
 // 		{"field", `{{.B}}`, S{}, ""},
 // 		{"field ptr", `{{.B}}`, &S{}, ""},
 // 		{"field unknown", `{{.B}}`, *new(any), ""},
-// 		{"field iface", `{{.F.B}}`, S{F: 1}, conservative},
+// 		{"field iface", `{{.Any.B}}`, S{F: 1}, conservative},
 // 		{"no field", `{{.X}}`, S{}, noX},
 // 		{"no field ptr", `{{.X}}`, &S{}, noX},
 // 		{"unexported", `{{.unexp}}`, S{}, "unexported field"},
@@ -106,7 +106,7 @@ func (s S) Add(x int) int { return s.I + x }
 // 		{"range two vars", `{{range $k, $e := .}}{{$e.X}}{{end}}`, map[string]S{"x": S{}}, noX},
 // 		{"range two vars 2", `{{range $k, $e := .}}{{$k.I}}{{end}}`, map[bool]string{true: "x"}, noI},
 // 		{"range bad type", `{{range 1}}{{end}}`, nil, "can't iterate over type"},
-// 		{"range iface", `{{range .F}}{{end}}`, S{F: 1}, conservative},
+// 		{"range iface", `{{range .Any}}{{end}}`, S{F: 1}, conservative},
 // 		{"chain ok", `{{(.P).I}}`, S{P: &S{}}, ""},
 // 		{"chain bool", `{{(true).I}}`, S{}, noI},
 // 		{"chain no field", `{{(.P).X}}`, S{}, noX},
@@ -149,7 +149,7 @@ func (s S) Add(x int) int { return s.I + x }
 // 		{"arg complex ok", `{{args true 0 0 1i}}`, nil, ""},
 // 		{"arg string", `{{variadic 1 2}}`, nil, "expected string; found 2"},
 // 		{"arg string ok", `{{variadic 1 "x"}}`, nil, ""},
-// 		{"arg iface", `{{add1 .F}}`, S{}, conservative},
+// 		{"arg iface", `{{add1 .Any}}`, S{}, conservative},
 // 		{"arg empty iface formal", `{{emptyiface 1}}`, nil, ""},    // any arg is OK
 // 		{"arg nonempty iface", `{{iface 1}}`, nil, "can't handle"}, // non-empty iface args never OK
 // 		{"arg struct", `{{structure 1}}`, nil, "can't handle"},     // struct args never OK
@@ -161,7 +161,7 @@ func (s S) Add(x int) int { return s.I + x }
 // 		{"len num", `{{len 3+2i}}`, nil, "len of 3+2i"},
 // 		{"len ptr", `{{len .}}`, &[1]int{0}, ""},
 // 		{"len struct", `{{len .}}`, S{}, "len of type templatecheck.S"},
-// 		{"len iface", `{{len .F}}`, S{F: 1}, conservative},
+// 		{"len iface", `{{len .Any}}`, S{F: 1}, conservative},
 
 // 		// index builtin
 // 		{"index no indexes", `{{index 1}}`, nil, ""},       // anything OK if no indexes...
@@ -449,10 +449,10 @@ func safeExec(tmpl *ttmpl.Template, dot any) (err error) {
 
 func TestCheckStrict(t *testing.T) {
 	const (
-		noX          = "can't use field X"
-		noI          = "can't use field I in type"
-		conservative = "TODO"
-		noField      = "cannot access field"
+		noX      = "can't use field X"
+		noI      = "can't use field I in type"
+		noField  = "cannot access field"
+		incompat = "incompatible types for comparison"
 	)
 
 	newChan := func() chan S {
@@ -468,6 +468,7 @@ func TestCheckStrict(t *testing.T) {
 		"intptr":       func(x *int) int { return 0 },
 		"variadic":     func(x int, ys ...string) string { return "" },
 		"nilary":       func() *S { return &S{P: &S{}} },
+		"float":        func(x any) float64 { return x.(float64) },
 		"emptyiface":   func(any) int { return 0 },
 		"iface":        func(io.Reader) int { return 0 },
 		"structure":    func(S) int { return 0 },
@@ -484,7 +485,7 @@ func TestCheckStrict(t *testing.T) {
 		{"field", `{{.B}}`, S{}, ""},
 		{"field ptr", `{{.B}}`, &S{}, ""},
 		{"field unknown", `{{.B}}`, *new(any), noField},
-		{"field iface", `{{.F.B}}`, S{F: 1}, noField},
+		{"field iface", `{{.Any.B}}`, S{Any: 1}, noField},
 		{"no field", `{{.X}}`, S{}, noX},
 		{"no field ptr", `{{.X}}`, &S{}, noX},
 		{"unexported", `{{.unexp}}`, S{}, "unexported field"},
@@ -522,7 +523,7 @@ func TestCheckStrict(t *testing.T) {
 		{"range two vars", `{{range $k, $e := .}}{{$e.X}}{{end}}`, map[string]S{"x": S{}}, noX},
 		{"range two vars 2", `{{range $k, $e := .}}{{$k.I}}{{end}}`, map[bool]string{true: "x"}, noI},
 		{"range bad type", `{{range 1}}{{end}}`, nil, "can't iterate over type"},
-		{"range iface", `{{range .F}}{{end}}`, S{F: 1}, "range can't iterate"},
+		{"range iface", `{{range .Any}}{{end}}`, S{Any: 1}, "range can't iterate"},
 		{"chain ok", `{{(.P).I}}`, S{P: &S{}}, ""},
 		{"chain bool", `{{(true).I}}`, S{}, noI},
 		{"chain no field", `{{(.P).X}}`, S{}, noX},
@@ -535,7 +536,7 @@ func TestCheckStrict(t *testing.T) {
 		{"assign same type", `{{$v := 1}}{{$v = 2}}{{$v.I}}`, nil, noI},
 		{"assign different type", `{{$v := 1}}{{$v = ""}}{{$v.I}}`, nil, "cannot assign"},
 		{"assign assignable type", `{{$v := stdin}}{{$v = stringReader ""}}`, nil, ""},
-		{"assign assignable type", `{{$v := stdin}}{{$v = 1}}`, nil, "cannot assign"},
+		{"assign assignable type 2", `{{$v := stdin}}{{$v = 1}}`, nil, "cannot assign"},
 		{"func args few", `{{and}}`, nil, "want at least 1, got 0"},
 		{"func args many", `{{le 1 2 3}}`, nil, "want 2, got 3"},
 
@@ -569,7 +570,7 @@ func TestCheckStrict(t *testing.T) {
 		{"arg complex ok", `{{args true 0 0 1i}}`, nil, ""},
 		{"arg string", `{{variadic 1 2}}`, nil, "expected string; found 2"},
 		{"arg string ok", `{{variadic 1 "x"}}`, nil, ""},
-		{"arg iface", `{{add1 .F}}`, S{}, conservative},
+		{"arg iface", `{{add1 .Any}}`, S{}, "wrong type"},
 		{"arg empty iface formal", `{{emptyiface 1}}`, nil, ""},    // any arg is OK
 		{"arg nonempty iface", `{{iface 1}}`, nil, "can't handle"}, // non-empty iface args never OK
 		{"arg struct", `{{structure 1}}`, nil, "can't handle"},     // struct args never OK
@@ -581,7 +582,7 @@ func TestCheckStrict(t *testing.T) {
 		{"len num", `{{len 3+2i}}`, nil, "len of 3+2i"},
 		{"len ptr", `{{len .}}`, &[1]int{0}, ""},
 		{"len struct", `{{len .}}`, S{}, "len of type templatecheck.S"},
-		{"len iface", `{{len .F}}`, S{F: 1}, conservative},
+		{"len iface", `{{len .Any}}`, S{Any: 1}, "len of interface {}"},
 
 		// index builtin
 		{"index no indexes", `{{index 1}}`, nil, ""},       // anything OK if no indexes...
@@ -616,7 +617,16 @@ func TestCheckStrict(t *testing.T) {
 		// eq/neq builtins
 		{"eq ok", `{{eq 1 2 }}`, nil, ""},
 		{"eq too few", `{{eq 1}}`, nil, "missing"},
-		{"eq func type", `{{eq . 1}}`, func() {}, conservative}, // we could notice that other arg cannot be nil
+		{"eq int and float", `{{eq (add1 1) (float 2.0)}}`, nil, incompat},
+		{"eq int and float literals", `{{eq 1 2.0}}`, nil, incompat}, // eq doesn't observe the Go rules for literals
+		{"eq float and string", `{{eq "x" 2.0}}`, nil, incompat},
+		{"eq nil nil", `{{eq nil nil}}`, nil, ""},
+		{"eq string and nil", `{{eq "x" nil}}`, nil, ""},
+		{"eq func type", `{{eq . 1}}`, func() {}, incompat},
+		{"eq func type nil", `{{eq . nil}}`, func() {}, ""},
+		{"eq nil func type", `{{eq nil .}}`, func() {}, ""},
+		{"eq func type nil 3", `{{eq . nil nil nil}}`, func() {}, ""},
+		{"eq func type nil 2 1", `{{eq . nil nil 1}}`, func() {}, incompat},
 		{"eq struct type", `{{eq . .}}`, S{}, "uncomparable type"},
 
 		// ordered comparisons
@@ -839,22 +849,19 @@ func TestCheckStrict(t *testing.T) {
 			}
 			err = CheckTextStrict(tmpl, test.dot)
 			if err != nil {
-				if test.want == "" || test.want == conservative {
+				if test.want == "" {
 					t.Fatalf("failed with %v, wanted success", err)
 				}
 				if !strings.Contains(err.Error(), test.want) {
 					t.Fatalf("%q not contained in %q", test.want, err)
 				}
-			} else if test.want != "" && test.want != conservative {
+			} else if test.want != "" {
 				t.Fatalf("succeeded, want error containing %q", test.want)
 			}
 			// Execute the template to make sure we get the same error state.
 			terr := safeExec(tmpl, test.dot)
-			if err == nil && terr != nil && test.want != conservative {
+			if err == nil && terr != nil {
 				t.Fatalf("Check suceeded but Execute failed with %v", terr)
-			}
-			if err == nil && terr == nil && test.want == conservative {
-				t.Fatal("Check conservatively succeeded but Execute did too, and should have failed")
 			}
 		})
 	}

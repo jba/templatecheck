@@ -9,29 +9,40 @@ import (
 	"text/template/parse"
 )
 
+// checkLen checks a call to the "len" built-in function.
+// it returns the type of the result, which is always int.
+// The number of args has already been checked, so we know len(args) == 1.
 func checkLen(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
-	arg := args[0]
+	validateLen(s, dot, args[0])
+	return intType
+}
+
+func validateLen(s *state, dot reflect.Type, arg parse.Node) {
 	argType, isLiteral := s.evalArg(dot, arg)
 	if isLiteral {
-		if argType == stringType {
-			return intType
+		if argType != stringType {
+			s.errorf("len of %s", arg)
 		}
-		s.errorf("len of %s", arg)
+		return
 	}
 	argType = indirectType(argType)
 	if argType == unknownType {
-		return intType
+		if s.strict {
+			s.errorf("len of unknown type")
+		} else {
+			return
+		}
 	}
 	switch argType.Kind() {
 	case reflect.Array, reflect.Chan, reflect.Map, reflect.Slice, reflect.String:
-		return intType
 	case reflect.Interface:
 		// We can't assume anything about an interface type.
-		return intType
+		if s.strict {
+			s.errorf("len of %s", typeString(argType))
+		}
 	default:
 		s.errorf("len of type %s", typeString(argType))
 	}
-	panic("not reached")
 }
 
 func checkIndex(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
@@ -97,20 +108,10 @@ func checkMapArg(s *state, indexType, keyType reflect.Type) {
 	if indexType.AssignableTo(keyType) {
 		return
 	}
-	if intLike(indexType.Kind()) && intLike(keyType.Kind()) && indexType.ConvertibleTo(keyType) {
+	if isIntegerType(indexType) && isIntegerType(keyType) && indexType.ConvertibleTo(keyType) {
 		return
 	}
 	s.errorf("index has type %s; should be %s", typeString(indexType), typeString(keyType))
-}
-
-func intLike(typ reflect.Kind) bool {
-	switch typ {
-	case reflect.Int, reflect.Int8, reflect.Int16, reflect.Int32, reflect.Int64:
-		return true
-	case reflect.Uint, reflect.Uint8, reflect.Uint16, reflect.Uint32, reflect.Uint64, reflect.Uintptr:
-		return true
-	}
-	return false
 }
 
 func checkSlice(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
@@ -144,6 +145,7 @@ func checkSlice(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
 	return resultType
 }
 
+// TODO: revisit this, matching the actual definition if eq in template/funcs.go.
 func checkEq(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
 	if len(args) == 1 {
 		s.errorf("missing argument for comparison")
@@ -154,6 +156,15 @@ func checkEq(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
 			s.errorf("uncomparable type: %s", typeString(typ))
 		}
 	}
+	if s.strict {
+		typ0, isLit0 := s.evalArg(dot, args[0])
+		for _, arg := range args[1:] {
+			typ, isLit := s.evalArg(dot, arg)
+			if !comparisonCompatible(typ0, isLit0, typ, isLit) {
+				s.errorf("incompatible types for comparison: %s and %s", typeString(typ0), typeString(typ))
+			}
+		}
+	}
 	return boolType
 }
 
@@ -161,6 +172,41 @@ func checkEq(s *state, dot reflect.Type, args []parse.Node) reflect.Type {
 // Only non-comparable struct types have that property.
 func definitelyNotComparable(t reflect.Type) bool {
 	return t != nil && t.Kind() == reflect.Struct && !t.Comparable()
+}
+
+func comparisonCompatible(t1 reflect.Type, isLit1 bool, t2 reflect.Type, isLit2 bool) bool {
+	if t1 == nil {
+		if t2 == nil {
+			return true
+		}
+		t1, t2 = t2, t1
+		isLit1, isLit2 = isLit2, isLit1
+	}
+	if t2 == nil {
+		// Comparison with untyped nil; always OK (?)
+		return true
+	}
+
+	if isIntegerType(t1) && isIntegerType(t2) {
+		return true
+	}
+	if isFloatType(t1) && isFloatType(t2) {
+		return true
+	}
+	if isComplexType(t1) && isComplexType(t2) {
+		return true
+	}
+	return false
+}
+
+// Can this otherwise non-comparable type be compared to a literal nil?
+func isNilComparable(t reflect.Type) bool {
+	switch t.Kind() {
+	case reflect.Slice, reflect.Map, reflect.Func:
+		return true
+	default:
+		return false
+	}
 }
 
 // check le, gt, etc.
@@ -177,15 +223,7 @@ func isOrderable(t reflect.Type) bool {
 	if t == nil {
 		return false
 	}
-	if intLike(t.Kind()) {
-		return true
-	}
-	switch t.Kind() {
-	case reflect.Float32, reflect.Float64, reflect.String:
-		return true
-	default:
-		return false
-	}
+	return t.Kind() == reflect.String || isIntegerType(t) || isFloatType(t)
 }
 
 func typeString(t reflect.Type) string {
