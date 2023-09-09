@@ -1,7 +1,5 @@
 strict mode:
 
-In setVar check for assignability, not equality.
-
 relaxed equality rules: see doc
 	One may not compare an int and a float
 

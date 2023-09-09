@@ -820,7 +820,7 @@ func (s *state) setVar(name string, typ reflect.Type) {
 	for i := s.mark() - 1; i >= 0; i-- {
 		v := s.vars[i]
 		if v.name == name {
-			if s.strict && typ != v.typ {
+			if s.strict && !typ.AssignableTo(v.typ) {
 				s.errorf("cannot assign type %s to variable %s of type %s", typ, v.name, v.typ)
 			}
 			s.vars[i].typ = typ

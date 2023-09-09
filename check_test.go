@@ -10,6 +10,7 @@ import (
 	htmpl "html/template"
 	"io"
 	"io/ioutil"
+	"os"
 	"strings"
 	"testing"
 	ttmpl "text/template"
@@ -462,14 +463,16 @@ func TestCheckStrict(t *testing.T) {
 	}
 
 	funcs := ttmpl.FuncMap{
-		"add1":       func(x int) int { return x + 1 },
-		"args":       func(bool, uint, float64, complex128) int { return 0 },
-		"intptr":     func(x *int) int { return 0 },
-		"variadic":   func(x int, ys ...string) string { return "" },
-		"nilary":     func() *S { return &S{P: &S{}} },
-		"emptyiface": func(any) int { return 0 },
-		"iface":      func(io.Reader) int { return 0 },
-		"structure":  func(S) int { return 0 },
+		"add1":         func(x int) int { return x + 1 },
+		"args":         func(bool, uint, float64, complex128) int { return 0 },
+		"intptr":       func(x *int) int { return 0 },
+		"variadic":     func(x int, ys ...string) string { return "" },
+		"nilary":       func() *S { return &S{P: &S{}} },
+		"emptyiface":   func(any) int { return 0 },
+		"iface":        func(io.Reader) int { return 0 },
+		"structure":    func(S) int { return 0 },
+		"stdin":        func() io.Reader { return os.Stdin },
+		"stringReader": func(s string) *strings.Reader { return strings.NewReader(s) },
 	}
 
 	for _, test := range []struct {
@@ -530,7 +533,9 @@ func TestCheckStrict(t *testing.T) {
 		{"chain ident ok", `{{nilary.P.I}}`, nil, ""},
 		{"chain ident", `{{nilary.P.X}}`, nil, noX},
 		{"assign same type", `{{$v := 1}}{{$v = 2}}{{$v.I}}`, nil, noI},
-		{"assign diffrent type", `{{$v := 1}}{{$v = ""}}{{$v.I}}`, nil, "cannot assign"},
+		{"assign different type", `{{$v := 1}}{{$v = ""}}{{$v.I}}`, nil, "cannot assign"},
+		{"assign assignable type", `{{$v := stdin}}{{$v = stringReader ""}}`, nil, ""},
+		{"assign assignable type", `{{$v := stdin}}{{$v = 1}}`, nil, "cannot assign"},
 		{"func args few", `{{and}}`, nil, "want at least 1, got 0"},
 		{"func args many", `{{le 1 2 3}}`, nil, "want 2, got 3"},
 
