@@ -35,6 +35,10 @@ func CheckHTML(t *htmpl.Template, typeValue any) error {
 	return check(htmlTemplate{t}, typeValue, false)
 }
 
+func CheckHTMLStrict(t *htmpl.Template, typeValue any) error {
+	return check(htmlTemplate{t}, typeValue, true)
+}
+
 type htmlTemplate struct {
 	tmpl *htmpl.Template
 }
@@ -87,6 +91,10 @@ func textFuncMap(textTmplPtr reflect.Value) reflect.Value {
 // CheckSafe checks a github.com/google/safehtml/template for problems. See CheckHTML for details.
 func CheckSafe(t *stmpl.Template, typeValue any) error {
 	return check(safeTemplate{t}, typeValue, false)
+}
+
+func CheckSafeStrict(t *stmpl.Template, typeValue any) error {
+	return check(safeTemplate{t}, typeValue, true)
 }
 
 type safeTemplate struct {
