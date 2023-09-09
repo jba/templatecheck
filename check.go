@@ -298,7 +298,11 @@ func (s *state) walkRange(dot reflect.Type, r *parse.RangeNode) {
 	typ := indirectType(s.evalPipeline(dot, r.Pipe))
 
 	if typ == unknownType {
-		s.errorf("range can't iterate over unknown type")
+		if s.strict {
+			s.errorf("range can't iterate over unknown type")
+		} else {
+			return
+		}
 	}
 	// mark top of stack before any variables in the body are pushed.
 	mark := s.mark()
@@ -327,6 +331,13 @@ func (s *state) walkRange(dot reflect.Type, r *parse.RangeNode) {
 			s.errorf("range can't iterate over send-only channel %v", typ)
 		}
 		rangeVars = checkBody(intType, typ.Elem())
+	case reflect.Interface:
+		if s.strict {
+			s.errorf("range can't iterate over type %v", typ)
+		} else {
+			// We can't assume anything about an interface type.
+			return
+		}
 	default:
 		s.errorf("range can't iterate over type %v", typ)
 	}
@@ -356,9 +367,11 @@ func (s *state) walkTemplate(dot reflect.Type, t *parse.TemplateNode) {
 			if dot != tt {
 				s.errorf("inconsistent types for template %s: %s and %s", t.Name, typeString(tt), typeString(dot))
 			}
-		} else {
-			s.tmplType[t.Name] = dot
+			// The template argument types are the same, and we checked
+			// the body previously, so nothing more to do.
+			return
 		}
+		s.tmplType[t.Name] = dot
 	}
 
 	newState := *s
