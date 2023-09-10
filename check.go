@@ -37,6 +37,26 @@ func CheckHTML(t *htmpl.Template, typeValue any) error {
 	return check(htmlTemplate{t}, typeValue, false)
 }
 
+// CheckHTMLStrict checks an html/template for problems. The second argument is the
+// type of dot passed to template.Execute.
+//
+// CheckHTMLStrict makes the same assumption about the "missingkey" option as
+// [CheckHTML] does.
+//
+// CheckHTMLStrict guarantees that no type errors will occur if t is executed
+// with a value of the given type. To do so, it restricts the semantics of
+// the template language as follows:
+//
+//   - All calls to templates created with "define" or "block" must pass the same
+//     type for dot.
+//   - Variables have a consistent type, determined when the variable is declared with ":=".
+//     If a variable is assigned a new value, the value's type must be assignable to the type
+//     used to declare it.
+//   - All types in an expression must be known. That includes field access, function calls
+//     and arguments to "range".
+//   - If the "and" or "or" functions are used for their value, then all their arguments
+//     must be of the same type. That restriction does not apply if they are used
+//     as an argument to "if", where only the truth value of the result matters.
 func CheckHTMLStrict(t *htmpl.Template, typeValue any) error {
 	return check(htmlTemplate{t}, typeValue, true)
 }
@@ -68,6 +88,7 @@ func CheckText(t *ttmpl.Template, typeValue any) error {
 	return check(textTemplate{t}, typeValue, false)
 }
 
+// CheckTextStrict does strict checking. See [CheckHTMLStrict] for details.
 func CheckTextStrict(t *ttmpl.Template, typeValue any) error {
 	return check(textTemplate{t}, typeValue, true)
 }
@@ -90,14 +111,6 @@ func (t textTemplate) FuncMap() reflect.Value {
 	return textFuncMap(reflect.ValueOf(t.tmpl))
 }
 
-// func (t textTemplate) Clone() (template, error) {
-// 	c, err := t.tmpl.Clone()
-// 	if err != nil {
-// 		return safeTemplate{}, err
-// 	}
-// 	return safeTemplate{c}, nil
-// }
-
 func (t textTemplate) Execute(w io.Writer, data any) error {
 	return t.tmpl.Execute(w, data)
 }
@@ -106,11 +119,12 @@ func textFuncMap(textTmplPtr reflect.Value) reflect.Value {
 	return textTmplPtr.Elem().FieldByName("parseFuncs")
 }
 
-// CheckSafe checks a github.com/google/safehtml/template for problems. See CheckHTML for details.
+// CheckSafe checks a github.com/google/safehtml/template for problems. See [CheckHTML] for details.
 func CheckSafe(t *stmpl.Template, typeValue any) error {
 	return check(safeTemplate{t}, typeValue, false)
 }
 
+// CheckSafeStrict does strict checking. See [CheckHTMLStrict] for details.
 func CheckSafeStrict(t *stmpl.Template, typeValue any) error {
 	return check(safeTemplate{t}, typeValue, true)
 }
@@ -130,14 +144,6 @@ func (t safeTemplate) Lookup(name string) template {
 }
 func (t safeTemplate) FuncMap() reflect.Value {
 	return textFuncMap(reflect.ValueOf(*t.tmpl).FieldByName("text"))
-}
-
-func (t safeTemplate) Clone() (template, error) {
-	c, err := t.tmpl.Clone()
-	if err != nil {
-		return safeTemplate{}, err
-	}
-	return safeTemplate{c}, nil
 }
 
 func (t safeTemplate) Execute(w io.Writer, data any) error {

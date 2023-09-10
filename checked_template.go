@@ -21,6 +21,12 @@ type tmpl[T any] interface {
 	Clone() (T, error)
 }
 
+// NewChecked type-checks t using one of the CheckXXXStrict functions.
+// If the check succeeds, it returns a CheckedTemplate[T] that behaves
+// like the argument template.
+//
+// Subsequent changes to the argument template do not affect the
+// CheckedTemplate.
 func NewChecked[T any, M tmpl[M]](t M) (*CheckedTemplate[T], error) {
 	c, err := t.Clone()
 	if err != nil {
@@ -34,6 +40,7 @@ func NewChecked[T any, M tmpl[M]](t M) (*CheckedTemplate[T], error) {
 	return &CheckedTemplate[T]{ct}, nil
 }
 
+// MustChecked is like NewChecked, but panics if type-checking fails.
 func MustChecked[T any, M tmpl[M]](t M) *CheckedTemplate[T] {
 	ct, err := NewChecked[T](t)
 	if err != nil {
