@@ -11,6 +11,9 @@ import (
 	htmpl "html/template"
 	"io"
 	"reflect"
+	"regexp"
+	"runtime"
+	"strconv"
 	"strings"
 	ttmpl "text/template"
 	"text/template/parse"
@@ -383,6 +386,13 @@ func (s *state) walkRange(dot reflect.Type, r *parse.RangeNode) {
 			// We can't assume anything about an interface type.
 			return
 		}
+	case reflect.Int:
+		if goMinorVersion() >= 24 {
+			rangeVars = checkBody(intType, intType)
+		} else {
+			s.errorf("range can't iterate over type %v; need go 1.24 or higher", typ)
+		}
+
 	default:
 		s.errorf("range can't iterate over type %v", typ)
 	}
@@ -986,6 +996,25 @@ func (s *state) lookupFuncInfo(name string) *funcInfo {
 		return &funcInfo{typ: t}
 	}
 	return builtinFuncInfos[name]
+}
+
+var goMinorVersionRegexp = regexp.MustCompile(`go1\.(\d+)`)
+
+func goMinorVersion() int {
+	return parseGoMinorVersion(runtime.Version())
+}
+
+func parseGoMinorVersion(s string) int {
+	m := goMinorVersionRegexp.FindStringSubmatch(s)
+	// If we don't recognize the version string, assume Go 1.23.
+	if m == nil {
+		return 23
+	}
+	n, err := strconv.Atoi(m[1])
+	if err != nil {
+		panic("bad regexp: matched non-number")
+	}
+	return n
 }
 
 var (

@@ -34,6 +34,29 @@ type S struct {
 
 func (s S) Add(x int) int { return s.I + x }
 
+type testCase struct {
+	name     string
+	contents string
+	dot      any
+	want     string // if non-empty, error should contain it
+}
+
+const conservative = "CONSERVATIVE" // Check succeeds but Execute fails
+
+var funcs = ttmpl.FuncMap{
+	"add1":         func(x int) int { return x + 1 },
+	"args":         func(bool, uint, float64, complex128) int { return 0 },
+	"intptr":       func(x *int) int { return 0 },
+	"variadic":     func(x int, ys ...string) string { return "" },
+	"nilary":       func() *S { return &S{P: &S{}} },
+	"float":        func(x any) float64 { return x.(float64) },
+	"emptyiface":   func(any) int { return 0 },
+	"iface":        func(io.Reader) int { return 0 },
+	"structure":    func(S) int { return 0 },
+	"stdin":        func() io.Reader { return os.Stdin },
+	"stringReader": func(s string) *strings.Reader { return strings.NewReader(s) },
+}
+
 func TestCheck(t *testing.T) {
 	const (
 		noX          = "can't use field X"
@@ -48,23 +71,7 @@ func TestCheck(t *testing.T) {
 		return c
 	}
 
-	funcs := ttmpl.FuncMap{
-		"add1":       func(x int) int { return x + 1 },
-		"args":       func(bool, uint, float64, complex128) int { return 0 },
-		"intptr":     func(x *int) int { return 0 },
-		"variadic":   func(x int, ys ...string) string { return "" },
-		"nilary":     func() *S { return &S{P: &S{}} },
-		"emptyiface": func(any) int { return 0 },
-		"iface":      func(io.Reader) int { return 0 },
-		"structure":  func(S) int { return 0 },
-	}
-
-	for _, test := range []struct {
-		name     string
-		contents string
-		dot      any
-		want     string // if non-empty, error should contain it
-	}{
+	for _, test := range []testCase{
 		{"field", `{{.B}}`, S{}, ""},
 		{"field ptr", `{{.B}}`, &S{}, ""},
 		{"field unknown", `{{.B}}`, *new(any), ""},
@@ -105,8 +112,8 @@ func TestCheck(t *testing.T) {
 		{"range one var", `{{range $e := .}}{{$e.X}}{{end}}`, make([]S, 1), noX},
 		{"range two vars", `{{range $k, $e := .}}{{$e.X}}{{end}}`, map[string]S{"x": S{}}, noX},
 		{"range two vars 2", `{{range $k, $e := .}}{{$k.I}}{{end}}`, map[bool]string{true: "x"}, noI},
-		{"range bad type", `{{range 1}}{{end}}`, nil, "can't iterate over type"},
-		{"range iface", `{{range .Any}}{{end}}`, S{Any: 1}, conservative},
+		{"range bad type", `{{range 1.5}}{{end}}`, nil, "can't iterate over type"},
+		{"range iface", `{{range .Any}}{{end}}`, S{Any: 1.5}, conservative},
 		{"chain ok", `{{(.P).I}}`, S{P: &S{}}, ""},
 		{"chain bool", `{{(true).I}}`, S{}, noI},
 		{"chain no field", `{{(.P).X}}`, S{}, noX},
@@ -399,40 +406,51 @@ func TestCheck(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			tmpl, err := ttmpl.New(test.name).
-				Funcs(funcs).
-				Option("missingkey=zero").
-				Parse(test.contents)
-			if err != nil {
-				t.Fatal("while parsing:", err)
-			}
-			if *debug {
-				fmt.Printf("%s =>\n", test.contents)
-				dump(tmpl.Root, 0)
-			}
-			err = CheckText(tmpl, test.dot)
-			if err != nil {
-				if test.want == "" || test.want == conservative {
-					t.Fatalf("failed with %v, wanted success", err)
-				}
-				if !strings.Contains(err.Error(), test.want) {
-					t.Fatalf("%q not contained in %q", test.want, err)
-				}
-			} else if test.want != "" && test.want != conservative {
-				t.Fatalf("succeeded, want error containing %q", test.want)
-			}
-			// Execute the template to make sure we get the same error state.
-			terr := safeExec(tmpl, test.dot)
-			if err == nil && terr != nil && test.want != conservative {
-				t.Fatalf("Check suceeded but Execute failed with %v", terr)
-			}
-			if err != nil && terr == nil {
-				t.Fatalf("Execute succeeded but Check failed with %v", err)
-			}
-			if err == nil && terr == nil && test.want == conservative {
-				t.Fatal("Check conservatively succeeded but Execute did too, and should have failed")
-			}
+			testTemplate(t, test, false)
 		})
+	}
+}
+
+func testTemplate(t *testing.T, test testCase, strict bool) {
+	t.Helper()
+	tmpl, err := ttmpl.New(test.name).
+		Funcs(funcs).
+		Option("missingkey=zero").
+		Parse(test.contents)
+	if err != nil {
+		t.Fatal("while parsing:", err)
+	}
+	if *debug {
+		fmt.Printf("%s =>\n", test.contents)
+		dump(tmpl.Root, 0)
+	}
+	if strict {
+		err = CheckTextStrict(tmpl, test.dot)
+	} else {
+		err = CheckText(tmpl, test.dot)
+	}
+	if err != nil {
+		if test.want == "" || test.want == conservative {
+			t.Fatalf("failed with %v, wanted success", err)
+		}
+		if !strings.Contains(err.Error(), test.want) {
+			t.Fatalf("%q not contained in %q", test.want, err)
+		}
+	} else if test.want != "" && test.want != conservative {
+		t.Fatalf("succeeded, want error containing %q", test.want)
+	}
+	// Execute the template to make sure we get the same error state.
+	terr := safeExec(tmpl, test.dot)
+	if err == nil && terr != nil && test.want != conservative {
+		t.Fatalf("Check suceeded but Execute failed with %v", terr)
+	}
+	if !strict {
+		if err != nil && terr == nil {
+			t.Fatalf("Execute succeeded but Check failed with %v", err)
+		}
+		if err == nil && terr == nil && test.want == conservative {
+			t.Fatal("Check conservatively succeeded but Execute did too, and should have failed")
+		}
 	}
 }
 
@@ -462,26 +480,7 @@ func TestCheckStrict(t *testing.T) {
 		return c
 	}
 
-	funcs := ttmpl.FuncMap{
-		"add1":         func(x int) int { return x + 1 },
-		"args":         func(bool, uint, float64, complex128) int { return 0 },
-		"intptr":       func(x *int) int { return 0 },
-		"variadic":     func(x int, ys ...string) string { return "" },
-		"nilary":       func() *S { return &S{P: &S{}} },
-		"float":        func(x any) float64 { return x.(float64) },
-		"emptyiface":   func(any) int { return 0 },
-		"iface":        func(io.Reader) int { return 0 },
-		"structure":    func(S) int { return 0 },
-		"stdin":        func() io.Reader { return os.Stdin },
-		"stringReader": func(s string) *strings.Reader { return strings.NewReader(s) },
-	}
-
-	for _, test := range []struct {
-		name     string
-		contents string
-		dot      any
-		want     string // if non-empty, error should contain it
-	}{
+	for _, test := range []testCase{
 		{"field", `{{.B}}`, S{}, ""},
 		{"field ptr", `{{.B}}`, &S{}, ""},
 		{"field unknown", `{{.B}}`, *new(any), noField},
@@ -513,6 +512,7 @@ func TestCheckStrict(t *testing.T) {
 		{"with dollar", `{{with .B}}{{$.X}}{{end}}`, S{B: true}, noX},
 		{"if", `{{if .P}}{{.P.X}}{{end}}`, S{P: &S{}}, noX},
 		{"ifelse", `{{if .P}}{{.B}}{{else}}{{.X}}{{end}}`, S{}, noX},
+
 		{"range slice ok", `{{range .}}{{.B}}{{end}}`, make([]S, 1), ""},
 		{"range slice", `{{range .}}{{.X}}{{end}}`, make([]S, 1), noX},
 		{"range map", `{{range .}}{{.X}}{{end}}`, map[string]S{"X": S{}}, noX},
@@ -522,8 +522,9 @@ func TestCheckStrict(t *testing.T) {
 		{"range one var", `{{range $e := .}}{{$e.X}}{{end}}`, make([]S, 1), noX},
 		{"range two vars", `{{range $k, $e := .}}{{$e.X}}{{end}}`, map[string]S{"x": S{}}, noX},
 		{"range two vars 2", `{{range $k, $e := .}}{{$k.I}}{{end}}`, map[bool]string{true: "x"}, noI},
-		{"range bad type", `{{range 1}}{{end}}`, nil, "can't iterate over type"},
+		{"range bad type", `{{range 1.5}}{{end}}`, nil, "can't iterate over type"},
 		{"range iface", `{{range .Any}}{{end}}`, S{Any: 1}, "range can't iterate"},
+
 		{"chain ok", `{{(.P).I}}`, S{P: &S{}}, ""},
 		{"chain bool", `{{(true).I}}`, S{}, noI},
 		{"chain no field", `{{(.P).X}}`, S{}, noX},
@@ -867,34 +868,21 @@ func TestCheckStrict(t *testing.T) {
 		},
 	} {
 		t.Run(test.name, func(t *testing.T) {
-			tmpl, err := ttmpl.New(test.name).
-				Funcs(funcs).
-				Option("missingkey=zero").
-				Parse(test.contents)
-			if err != nil {
-				t.Fatal("while parsing:", err)
-			}
-			if *debug {
-				fmt.Printf("%s =>\n", test.contents)
-				dump(tmpl.Root, 0)
-			}
-			err = CheckTextStrict(tmpl, test.dot)
-			if err != nil {
-				if test.want == "" {
-					t.Fatalf("failed with %v, wanted success", err)
-				}
-				if !strings.Contains(err.Error(), test.want) {
-					t.Fatalf("%q not contained in %q", test.want, err)
-				}
-			} else if test.want != "" {
-				t.Fatalf("succeeded, want error containing %q", test.want)
-			}
-			// Execute the template to make sure we get the same error state.
-			terr := safeExec(tmpl, test.dot)
-			if err == nil && terr != nil {
-				t.Fatalf("Check suceeded but Execute failed with %v", terr)
-			}
+			testTemplate(t, test, true)
 		})
+	}
+}
+
+func TestGo124(t *testing.T) {
+	// New features in Go 1.24. These should be errors in earlier versions.
+	for _, test := range []testCase{
+		{"range int", `{{range .}}{{end}}`, 5, "can't iterate over type"},
+	} {
+		if goMinorVersion() > 23 {
+			test.want = ""
+		}
+		testTemplate(t, test, false)
+		testTemplate(t, test, true)
 	}
 }
 
@@ -947,5 +935,21 @@ func dump(n parse.Node, level int) {
 	default:
 		fmt.Printf(" %s\n", n)
 	}
+}
 
+func TestParseGoMinorVersion(t *testing.T) {
+	for _, test := range []struct {
+		in   string
+		want int
+	}{
+		{"", 23}, // default
+		{"go1.23", 23},
+		{"go version go1.23-20240626-RC01 cl/646990413 +5a18e79687 X:fieldtrack,boringcrypto linux/amd64", 23},
+		{"go version devel go1.24-5fe3b31cf8 Fri Sep 27 16:45:09 2024 +0000 linux/amd64", 24},
+	} {
+		got := parseGoMinorVersion(test.in)
+		if g, w := got, test.want; g != w {
+			t.Errorf("%q: got %d, want %d", test.in, g, w)
+		}
+	}
 }
