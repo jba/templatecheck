@@ -372,13 +372,16 @@ func (s *state) walkRange(dot reflect.Type, r *parse.RangeNode) {
 	switch typ.Kind() {
 	case reflect.Array, reflect.Slice:
 		rangeVars = checkBody(intType, typ.Elem())
+
 	case reflect.Map:
 		rangeVars = checkBody(typ.Key(), typ.Elem())
+
 	case reflect.Chan:
 		if typ.ChanDir() == reflect.SendDir {
 			s.errorf("range can't iterate over send-only channel %v", typ)
 		}
 		rangeVars = checkBody(intType, typ.Elem())
+
 	case reflect.Interface:
 		if s.strict {
 			s.errorf("range can't iterate over type %v", typ)
@@ -393,6 +396,14 @@ func (s *state) walkRange(dot reflect.Type, r *parse.RangeNode) {
 			s.errorf("range can't iterate over type %v; need go 1.24 or higher", typ)
 		}
 
+	case reflect.Func:
+		t1, t2, ok := seqArgTypes(typ)
+		if goMinorVersion() >= 24 && ok {
+			rangeVars = checkBody(t1, t2)
+		} else {
+			s.errorf("range can't iterate over type %v; need go 1.24 or higher", typ)
+		}
+
 	default:
 		s.errorf("range can't iterate over type %v", typ)
 	}
@@ -401,6 +412,38 @@ func (s *state) walkRange(dot reflect.Type, r *parse.RangeNode) {
 	}
 	if !s.strict {
 		s.joinVars(s.vars[:origMark], rangeVars, elseVars)
+	}
+}
+
+// seqArgTypes returns the types of a function that can be used in a range
+// statement in Go 1.23 or higher.
+// If t is of the form func(yield func() bool), seqArgTypes returns intType, intType, true
+// If t is of the form func(yield func(V) bool), seqArgTypes returns intType, type of V, true
+// If t is of the form func(yield func(K, V) bool), seqArgTypes returns type Of K, type of V, true
+// Otherwise, seqArgTypes returns nil, nil, bool.
+func seqArgTypes(t reflect.Type) (k, v reflect.Type, ok bool) {
+	if t.Kind() != reflect.Func {
+		return nil, nil, false
+	}
+	if t.NumIn() != 1 {
+		return nil, nil, false
+	}
+	argt := t.In(0)
+	if argt.Kind() != reflect.Func {
+		return nil, nil, false
+	}
+	if argt.NumOut() != 1 || argt.Out(0).Kind() != reflect.Bool {
+		return nil, nil, false
+	}
+	switch argt.NumIn() {
+	case 0:
+		return intType, intType, true
+	case 1:
+		return intType, argt.In(0), true
+	case 2:
+		return argt.In(0), argt.In(1), true
+	default:
+		return nil, nil, false
 	}
 }
 
@@ -1000,6 +1043,7 @@ func (s *state) lookupFuncInfo(name string) *funcInfo {
 
 var goMinorVersionRegexp = regexp.MustCompile(`go1\.(\d+)`)
 
+// goMinorVersion returns the minor version of the Go release executing this code.
 func goMinorVersion() int {
 	return parseGoMinorVersion(runtime.Version())
 }

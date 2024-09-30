@@ -9,7 +9,6 @@ import (
 	"fmt"
 	htmpl "html/template"
 	"io"
-	"io/ioutil"
 	"os"
 	"strings"
 	"testing"
@@ -105,12 +104,12 @@ func TestCheck(t *testing.T) {
 		{"ifelse", `{{if .P}}{{.B}}{{else}}{{.X}}{{end}}`, S{}, noX},
 		{"range slice ok", `{{range .}}{{.B}}{{end}}`, make([]S, 1), ""},
 		{"range slice", `{{range .}}{{.X}}{{end}}`, make([]S, 1), noX},
-		{"range map", `{{range .}}{{.X}}{{end}}`, map[string]S{"X": S{}}, noX},
+		{"range map", `{{range .}}{{.X}}{{end}}`, map[string]S{"X": {}}, noX},
 		{"range chan ok", `{{range .}}{{.I}}{{end}}`, newChan(), ""},
 		{"range chan", `{{range .}}{{.X}}{{end}}`, newChan(), noX},
 		{"range chan send", `{{range .}}{{end}}`, make(chan<- S), "over send-only channel"},
 		{"range one var", `{{range $e := .}}{{$e.X}}{{end}}`, make([]S, 1), noX},
-		{"range two vars", `{{range $k, $e := .}}{{$e.X}}{{end}}`, map[string]S{"x": S{}}, noX},
+		{"range two vars", `{{range $k, $e := .}}{{$e.X}}{{end}}`, map[string]S{"x": {}}, noX},
 		{"range two vars 2", `{{range $k, $e := .}}{{$k.I}}{{end}}`, map[bool]string{true: "x"}, noI},
 		{"range bad type", `{{range 1.5}}{{end}}`, nil, "can't iterate over type"},
 		{"range iface", `{{range .Any}}{{end}}`, S{Any: 1.5}, conservative},
@@ -184,7 +183,7 @@ func TestCheck(t *testing.T) {
 		{"index map ok ", `{{index . "x"}}`, map[string]int{}, ""},
 		{"index map", `{{index . 1}}`, map[string]int{}, "has type int; should be string"},
 		{"index map 2", `{{index . "x" 1}}`, map[string]int{}, "can't index item of type"},
-		{"index map slice", `{{index . "x" 0}}`, map[string][]int{"x": []int{1}}, ""},
+		{"index map slice", `{{index . "x" 0}}`, map[string][]int{"x": {1}}, ""},
 		{"index map nil", `{{index . nil}}`, map[string]int{}, "value is nil; should be"},
 		{"index map nil ok", `{{index . nil}}`, map[*string]int{}, ""},
 		{"index indirect", `{{index . 0}}`, &[1]int{1}, ""},
@@ -462,7 +461,7 @@ func safeExec(tmpl *ttmpl.Template, dot any) (err error) {
 		}
 	}()
 
-	return tmpl.Execute(ioutil.Discard, dot)
+	return tmpl.Execute(io.Discard, dot)
 }
 
 func TestCheckStrict(t *testing.T) {
@@ -515,12 +514,12 @@ func TestCheckStrict(t *testing.T) {
 
 		{"range slice ok", `{{range .}}{{.B}}{{end}}`, make([]S, 1), ""},
 		{"range slice", `{{range .}}{{.X}}{{end}}`, make([]S, 1), noX},
-		{"range map", `{{range .}}{{.X}}{{end}}`, map[string]S{"X": S{}}, noX},
+		{"range map", `{{range .}}{{.X}}{{end}}`, map[string]S{"X": {}}, noX},
 		{"range chan ok", `{{range .}}{{.I}}{{end}}`, newChan(), ""},
 		{"range chan", `{{range .}}{{.X}}{{end}}`, newChan(), noX},
 		{"range chan send", `{{range .}}{{end}}`, make(chan<- S), "over send-only channel"},
 		{"range one var", `{{range $e := .}}{{$e.X}}{{end}}`, make([]S, 1), noX},
-		{"range two vars", `{{range $k, $e := .}}{{$e.X}}{{end}}`, map[string]S{"x": S{}}, noX},
+		{"range two vars", `{{range $k, $e := .}}{{$e.X}}{{end}}`, map[string]S{"x": {}}, noX},
 		{"range two vars 2", `{{range $k, $e := .}}{{$k.I}}{{end}}`, map[bool]string{true: "x"}, noI},
 		{"range bad type", `{{range 1.5}}{{end}}`, nil, "can't iterate over type"},
 		{"range iface", `{{range .Any}}{{end}}`, S{Any: 1}, "range can't iterate"},
@@ -599,7 +598,7 @@ func TestCheckStrict(t *testing.T) {
 		{"index map ok ", `{{index . "x"}}`, map[string]int{}, ""},
 		{"index map", `{{index . 1}}`, map[string]int{}, "has type int; should be string"},
 		{"index map 2", `{{index . "x" 1}}`, map[string]int{}, "can't index item of type"},
-		{"index map slice", `{{index . "x" 0}}`, map[string][]int{"x": []int{1}}, ""},
+		{"index map slice", `{{index . "x" 0}}`, map[string][]int{"x": {1}}, ""},
 		{"index map nil", `{{index . nil}}`, map[string]int{}, "value is nil; should be"},
 		{"index map nil ok", `{{index . nil}}`, map[*string]int{}, ""},
 		{"index indirect", `{{index . 0}}`, &[1]int{1}, ""},
@@ -875,8 +874,13 @@ func TestCheckStrict(t *testing.T) {
 
 func TestGo124(t *testing.T) {
 	// New features in Go 1.24. These should be errors in earlier versions.
+	seq1 := func(func(string) bool) {}
+	seq2 := func(func(string, int) bool) {}
+
 	for _, test := range []testCase{
 		{"range int", `{{range .}}{{end}}`, 5, "can't iterate over type"},
+		{"range Seq1", `{{range .}}{{end}}`, seq1, "can't iterate over type"},
+		{"range Seq2", `{{range .}}{{end}}`, seq2, "can't iterate over type"},
 	} {
 		if goMinorVersion() > 23 {
 			test.want = ""
