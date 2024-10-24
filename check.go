@@ -8,12 +8,11 @@ package templatecheck
 
 import (
 	"fmt"
+	"go/version"
 	htmpl "html/template"
 	"io"
 	"reflect"
-	"regexp"
 	"runtime"
-	"strconv"
 	"strings"
 	ttmpl "text/template"
 	"text/template/parse"
@@ -390,19 +389,20 @@ func (s *state) walkRange(dot reflect.Type, r *parse.RangeNode) {
 			return
 		}
 	case reflect.Int:
-		if goMinorVersion() >= 24 {
-			rangeVars = checkBody(intType, intType)
-		} else {
-			s.errorf("range can't iterate over type %v; need go 1.24 or higher", typ)
+		if msg := checkLangVersion(runtime.Version(), "go1.22"); msg != "" {
+			s.errorf("range can't iterate over type %v; %s", typ, msg)
 		}
+		rangeVars = checkBody(intType, intType)
 
 	case reflect.Func:
-		t1, t2, ok := seqArgTypes(typ)
-		if goMinorVersion() >= 24 && ok {
-			rangeVars = checkBody(t1, t2)
-		} else {
-			s.errorf("range can't iterate over type %v; need go 1.24 or higher", typ)
+		if msg := checkLangVersion(runtime.Version(), "go1.23"); msg != "" {
+			s.errorf("range can't iterate over type %v; %s", typ, msg)
 		}
+		t1, t2, ok := seqArgTypes(typ)
+		if !ok {
+			s.errorf("bad function in range-over-func")
+		}
+		rangeVars = checkBody(t1, t2)
 
 	default:
 		s.errorf("range can't iterate over type %v", typ)
@@ -413,6 +413,23 @@ func (s *state) walkRange(dot reflect.Type, r *parse.RangeNode) {
 	if !s.strict {
 		s.joinVars(s.vars[:origMark], rangeVars, elseVars)
 	}
+}
+
+// checkLangVersion returns an error message if the language version of have is less than want
+// (which must be a proper language version). Otherwise, it returns the empty string.
+func checkLangVersion(have, want string) string {
+	if want != version.Lang(want) {
+		panic("bad want arg")
+	}
+	haveLang := version.Lang(have)
+	if version.Compare(haveLang, want) >= 0 {
+		return ""
+	}
+	inv := ""
+	if !version.IsValid(haveLang) {
+		inv = " (which is invalid)"
+	}
+	return fmt.Sprintf("have Go version %q, language version %q%s, need %s or higher", have, haveLang, inv, want)
 }
 
 // seqArgTypes returns the types of a function that can be used in a range
@@ -1041,25 +1058,8 @@ func (s *state) lookupFuncInfo(name string) *funcInfo {
 	return builtinFuncInfos[name]
 }
 
-var goMinorVersionRegexp = regexp.MustCompile(`go1\.(\d+)`)
-
-// goMinorVersion returns the minor version of the Go release executing this code.
-func goMinorVersion() int {
-	return parseGoMinorVersion(runtime.Version())
-}
-
-func parseGoMinorVersion(s string) int {
-	m := goMinorVersionRegexp.FindStringSubmatch(s)
-	// If we don't recognize the version string, assume Go 1.23.
-	if m == nil {
-		return 23
-	}
-	n, err := strconv.Atoi(m[1])
-	if err != nil {
-		panic("bad regexp: matched non-number")
-	}
-	return n
-}
+// for testing
+var runtimeVersion = runtime.Version
 
 var (
 	oneOrMoreValues = []reflect.Type{reflectValueType, reflect.SliceOf(reflectValueType)}
